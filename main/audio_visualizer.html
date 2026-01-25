@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="./node_modules/bootstrap/dist/css/bootstrap.min.css">
+    <title>实时语音可视化</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body, html {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #000;
+        }
+        #visualizer {
+            display: block;
+        }
+        .buttons_bar {
+            position: absolute;
+            left: 0;
+            right: 0;
+            top: 60%;
+            height: 40%;
+            width: 100%;
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+        }
+        .inner-container {
+            position: relative;
+            left: 50%;
+            right: 50%;
+            position-anchor: inherit;
+            transform: translateX(-50%);
+        }
+        .inform-bar {
+            border-radius: 0px 0px 45px 45px;
+            background-color: #92929256;
+            position: absolute;
+            left: 0;
+            right: 0;
+            top: 0;
+            height: 40%;
+            display: flex;
+            flex-direction: column;
+        }
+    </style>
+</head>
+<body>
+    <div class="inform-bar">
+        <div id="formation_bar", style="position: absolute;top: 0;height: 60%;width: 100%;">
+            <p id="spl_value" style="color: green;line-height: 100%;text-align: center;font-size: 100px;">-- dB</p>
+        </div>
+        <div id="buttons", class="buttons_bar">
+            <div id="inner-container" class="inner-container">
+                <button id="stop" class="btn btn-outline-danger btn-lg" onclick="end_reading()">停止朗读</button>
+                <button id="continue" class="btn btn-outline-primary btn-lg">继续朗读</button>
+                <button id="pause" class="btn btn-outline-primary btn-lg">暂停朗读</button>
+            </div>
+        </div>
+    </div>
+    <canvas id="visualizer" style="position: absolute;bottom: 0;"></canvas>
+
+    <script>
+    // 获取Canvas元素
+    
+    const canvas = document.getElementById('visualizer');
+    const ctx = canvas.getContext('2d');
+    
+    // 音频相关变量
+    let audioContext;
+    let analyser;
+    let microphone;
+    let dataArray;
+    let timeDomainArray;
+    let animationId;
+    let isActive = false;
+    let previousData = [];
+    let processTimer = null; // 新增：processAudio 定时器句柄
+    let workerTimer = null;  // 新增：worker_data 定时器句柄
+    const splDisplay = document.getElementById('spl_value');
+    let CALIBRATION_OFFSET_DB = 0;
+    let if_paused = false;
+    
+    // 设置Canvas尺寸为窗口大小
+    function resizeCanvas() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight * 0.6;
+    }
+    
+    // 初始化尺寸并监听窗口大小变化
+    resizeCanvas();
+    
+    // 防抖函数限制调整大小事件的频率
+    function debounce(func, wait) {
+        let timeout;
+        return function (...args) {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => func.apply(this, args), wait);
+        };
+    }
+    
+    // 使用防抖的调整大小监听器
+    window.addEventListener('resize', debounce(resizeCanvas, 100));
+    
+    // 初始化音频分析器
+    function initAudio() {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        analyser = audioContext.createAnalyser();
+        analyser.fftSize = 512;
+        
+        const bufferLength = analyser.frequencyBinCount;
+        dataArray = new Uint8Array(bufferLength);
+        previousData = new Array(bufferLength).fill(0);
+        // 时域缓冲长度使用 fftSize
+        timeDomainArray = new Float32Array(analyser.fftSize);
+    }
+    
+    // 停止可视化
+    function stopVisualization() {
+        if (animationId) {
+            cancelAnimationFrame(animationId);
+            animationId = null;
+        }
+        // 清除新增的定时器
+        if (processTimer !== null) {
+            clearInterval(processTimer);
+            processTimer = null;
+        }
+        if (workerTimer !== null) {
+            clearInterval(workerTimer);
+            workerTimer = null;
+        }
+        isActive = false;
+    }
+    
+    // Web Worker script as a string
+    const workerScript = `
+        let previousData = [];
+        onmessage = (event) => {
+            const dataArray = event.data;
+            if (previousData.length !== dataArray.length) {
+                previousData = new Array(dataArray.length).fill(0);
+            }
+            const smoothedData = dataArray.map((value, index) => {
+                const smoothed = (value * 0.3) + (previousData[index] * 0.7);
+                previousData[index] = smoothed;
+                return smoothed;
+            });
+            postMessage(smoothedData);
+        };
+    `;
+
+    // Create a Blob URL for the worker
+    const workerBlob = new Blob([workerScript], { type: 'application/javascript' });
+    const workerBlobURL = URL.createObjectURL(workerBlob);
+
+    // Initialize the Web Worker using the Blob URL
+    let worker = new Worker(workerBlobURL);
+
+    // Limit refresh rate to 30 FPS
+    const FRAME_INTERVAL = 1000 / 40;
+    let lastFrameTime = 0;
+
+    // Modify drawVisualization to use worker data
+    function drawVisualization(processedData) {
+        const now = performance.now();
+        if (now - lastFrameTime < FRAME_INTERVAL) return;
+        lastFrameTime = now;
+
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        const barWidth = (canvas.width / processedData.length) * 2.5;
+        let x = 0;
+
+        for (let i = 0; i < processedData.length; i++) {
+            const barHeight = (processedData[i] / 255) * canvas.height;
+            const hue = 180 + (i / processedData.length) * 200;
+            const alpha = 0.6 + (processedData[i] / 255) * 0.4;
+            ctx.fillStyle = `hsla(${hue}, 100%, 50%, ${alpha})`;
+
+            const y = canvas.height - barHeight;
+            ctx.fillRect(x, y, barWidth, barHeight);
+
+            if (barHeight > 5) {
+                ctx.fillStyle = `hsla(${hue}, 100%, 80%, ${alpha * 0.8})`;
+                ctx.fillRect(x, y, barWidth, Math.max(2, barHeight * 0.15));
+            }
+
+            x += barWidth + 1;
+        }
+    }
+    let count = 0
+    // Modify startMic to send data to the worker
+    async function startMic() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+
+            if (!audioContext) {
+                initAudio();
+            } else if (audioContext.state === 'suspended') {
+                await audioContext.resume();
+            }
+
+            if (microphone) {
+                microphone.disconnect();
+            }
+
+            microphone = audioContext.createMediaStreamSource(stream);
+            microphone.connect(analyser);
+
+            isActive = true;
+
+            // 独立启动 processAudio（只处理时域数据与 SPL，每秒一次）
+            function processAudio() {
+                if (!isActive) return;
+
+                analyser.getFloatTimeDomainData(timeDomainArray);
+                let sumSquares = 0;
+                for (let i = 0; i < timeDomainArray.length; i++) {
+                    const s = timeDomainArray[i];
+                    sumSquares += s * s;
+                }
+                const rms = Math.sqrt(sumSquares / timeDomainArray.length) || Number.EPSILON;
+                const dbfs = 20 * (Math.log10 ? Math.log10(rms) : Math.log(rms) / Math.LN10);
+                const dbSpl = dbfs + CALIBRATION_OFFSET_DB;
+                if (splDisplay) {
+                    splDisplay.textContent = `${Math.round(dbSpl)} dB`;
+                    if (dbSpl >= window.threshold) {
+                        if (timer_running) {
+                            createThresholdTimer().clear()
+                        }
+                        state = "reading"
+                    }
+                    else {
+                        if (timer_running) {
+                            if_too_long = createThresholdTimer().isBelowThreshold()
+                            console.log(if_too_long)
+                            if (if_too_long) {
+                                state = "pre-paused"
+                            }
+                            else {
+                                state = "db-paused"
+                            }
+                        }
+                        else {
+                            createThresholdTimer().start()
+                        }
+                    }
+                    try {
+                        count++
+                        console.log(count)
+                        if (count % 2 == 0) {
+                            console.log(state)
+                            send_post(state, dbSpl)
+                        }
+                    }
+                    catch (e) {
+                        console.error(e)
+                        console.log("failed to send data post to the server!")
+                    }
+                }
+                
+            }
+
+            // 独立启动 worker_data（按 FRAME_INTERVAL 发送频谱数据到 worker）
+            function worker_data() {
+                if (!isActive) return;
+                // 每次发送前先获取最新频谱数据
+                analyser.getByteFrequencyData(dataArray);
+                // 发送副本，避免在主线程和 worker 之间共享同一缓冲导致竞态
+                worker.postMessage(dataArray.slice());
+            }
+            //独立启动read_timer,发送朗读计时数据到服务器
+            // 用独立的定时器分别调度，互不影响
+            processTimer = setInterval(processAudio, 500);         // 每秒2帧
+            workerTimer = setInterval(worker_data, FRAME_INTERVAL); 
+
+        } catch (err) {
+            console.error('麦克风访问错误:', err);
+            stopVisualization();
+            ctx.fillStyle = 'white';
+            ctx.font = '20px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('无法访问麦克风，请检查权限设置', canvas.width/2, canvas.height/2);
+        }
+    }
+    let timer_running = false;
+    function createThresholdTimer(thresholdMs = 5000) {
+        let cleared = false;
+
+        return {
+            start() {
+                // 启动计时：若处于 cleared 或 未运行则开始计时；若已在运行则保持不变
+                if (!timer_running) {
+                    window.startTime = Date.now();
+                    timer_running = true;
+                    cleared = false;
+                }
+            },
+            stop() {
+                // 停止计时并进入关闭态（不重置 elapsed）
+                timer_running = false;
+            },
+            clear() {
+                // 清空并保持关闭（重置 elapsed）
+                timer_running = false;
+                cleared = true;
+                window.startTime = null;
+            },
+            isBelowThreshold() {
+                return (Date.now() - window.startTime) < thresholdMs;
+            },
+            getElapsed() {
+                if (!timer_running || window.startTime === null) return 0;
+                return Date.now() - window.startTime;
+            }
+        };
+    }
+    // Listen for processed data from the worker
+    worker.onmessage = (event) => {
+        drawVisualization(event.data);
+    };
+
+    // 页面加载完成后自动启动
+    window.addEventListener('load', function() {
+        const url = window.location
+        fetch('http://127.0.0.1:8008/get_temp', {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({'msg': "get_temp"})
+        })
+            .then(response => response.json())
+            .then(params => {
+                console.log("Parameters loaded from JSON file:", params);
+                // Use the parameters in your HTML/JavaScript logic
+                CALIBRATION_OFFSET_DB = Number(params.calibration)
+                window.threshold = Number(params.threshold)
+            })
+            .catch(error => console.error("Error loading parameters:", error));
+        startMic()
+    });
+    function send_post(state, dB) {
+        fetch("http://127.0.0.1:8008/get_state", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({'state': state, "db": dB})
+        })
+        .then(response => response.json())
+        .then(params => {
+            if (params == "err") {
+                console.log("ERR:send_failed")
+            }
+        })
+        .catch(err => {
+            alert(err)
+        })
+    }
+    // 卸载页面前的清理工作
+    window.addEventListener('beforeunload', () => {
+        stopVisualization();
+        if (audioContext) {
+            audioContext.close();
+        }
+        end_reading()
+    });
+    function end_reading() {
+        fetch("http://127.0.0.1:8008/end_reading", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({"end": true})
+        })
+        .then(response => response.json())
+        .then(data => {
+            console.log("Response data:", data); // Debugging log
+            if (data && data.msg === "ok") {
+                window.close();
+            } else {
+                alert(`Error: ${data?.msg || "Unexpected response format"}`);
+            }
+        })
+        .catch(error => {
+            console.error("Fetch error:", error);
+        });
+    }
+    function pause() {
+        
+    }
+    </script>
+</body>
+</html>
