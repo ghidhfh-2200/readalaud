@@ -1,9 +1,2 @@
 *.pyc
-tts_service/ttsvenv/
-main/.venv/
-main/.vscode/
-dist/
-build/
-venv/
-env/
-EOF
+/vscode/
