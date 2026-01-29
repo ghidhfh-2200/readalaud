@@ -3,8 +3,7 @@ import json
 from tkinter import messagebox
 import tkinter as tk
 import os
-from multiprocessing import Process, Queue, get_context
-from queue import Empty as QueueEmpty
+from multiprocessing import get_context
 from . import server,server_manager
 import subprocess
 import platform
@@ -13,7 +12,6 @@ import threading
 import time
 import csv
 from . import tts
-from pathlib import Path
 
 def bind_reading_api(instance):
     instance.reading_data_get = lambda: reading_data_get_and_check(instance)
@@ -157,7 +155,7 @@ def start_server(queue):
 def start_webpage():
     abs_path = pathlib.Path(__file__).resolve()
     parent_path = abs_path.parent.parent
-    file_path = str(parent_path / "audio_visualizer.html")
+    file_path = str(parent_path / "web" / "audio_visualizer.html")
     try:
         if platform.system() == "Windows":
             os.startfile(file_path)
@@ -166,7 +164,7 @@ def start_webpage():
         elif platform.system() == "Darwin":
             subprocess.call(["open", file_path])
         else:
-            messagebox.showerror("您当前操作系统不支持自动打开朗读界面！\n请手动在浏览器打开_internal目录下的audio_visualizer.html文件")
+            messagebox.showerror("您当前操作系统不支持自动打开朗读界面！\n请手动在浏览器打开web目录下的audio_visualizer.html文件")
             print("Unsupported operating system")
     except Exception as e:
         log(f"打开文件失败: {e}")
@@ -242,6 +240,11 @@ def start_reading(self):
                                                                               self,))
         self.roll_check_threading.daemon = True
         self.roll_check_threading.start()
+def WriteCountDbWrite(db_list, acount):
+    # Added missing function WriteCountDbWrite to log DB data for the current date
+    get_date = datetime.datetime.now().strftime('%Y-%m-%d')
+    write_db_data(acount=acount, db=db_list, date=get_date)
+
 def roll_check(state, queue, information_label_list,instance):
     # instance.if_reading is used to control the loop; the thread will set
     # it to False when an end signal is received.
@@ -249,7 +252,7 @@ def roll_check(state, queue, information_label_list,instance):
     db_list = []
     while getattr(instance, 'if_reading', True):
         print("write_count" + str(write_count))
-        current_account = getattr(instance, "current_acount")
+        # Removed unused variable current_account
         try:
             # 使用带超时的 get，以便可以及时响应停止信号
             try:
@@ -316,7 +319,31 @@ def roll_check(state, queue, information_label_list,instance):
                                     ][idx]
                                 ))
                         elif get_state == "paused":
-                            """手动暂停无需操作"""
+                            # Handle paused state: Update total time and efficiency, show "Paused"
+                            try:
+                                state.after(0, lambda s=state: s.config(text="已暂停"))
+
+                                # Increment total time
+                                instance.read_today_data['total'] = float(instance.read_today_data['total']) + 1
+                                
+                                # Recalculate efficiency
+                                if float(instance.read_today_data['total']) > 0:
+                                    instance.read_today_data['efficiency'] = round(float(instance.read_today_data['real_read_time']) / float(instance.read_today_data['total']), 2)
+
+                                # Update UI labels using the existing logic
+                                for i, label in enumerate(information_label_list):
+                                    state.after(0, lambda lbl=label, idx=i: lbl.configure(
+                                        text=[
+                                            f"剩余时长: {datetime.timedelta(seconds=float(instance.read_today_data['left']))}",
+                                            f"停顿总时长: {datetime.timedelta(seconds=float(instance.read_today_data['stop_total']))}",
+                                            f"有效朗读时间: {datetime.timedelta(seconds=float(instance.read_today_data['real_read_time']))}",
+                                            f"总时长: {datetime.timedelta(seconds=float(instance.read_today_data['total']))}",
+                                            f"最大音量: {instance.read_today_data['max_sound']}",
+                                            f"效率: {instance.read_today_data['efficiency']}"
+                                        ][idx]
+                                    ))
+                            except Exception:
+                                pass
                     except Exception:
                         pass
                 except Exception:

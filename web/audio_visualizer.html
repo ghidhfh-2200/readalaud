@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="./node_modules/bootstrap/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="../node_modules/bootstrap/dist/css/bootstrap.min.css">
     <title>实时语音可视化</title>
     <style>
         * {
@@ -59,8 +59,8 @@
         <div id="buttons", class="buttons_bar">
             <div id="inner-container" class="inner-container">
                 <button id="stop" class="btn btn-outline-danger btn-lg" onclick="end_reading()">停止朗读</button>
-                <button id="continue" class="btn btn-outline-primary btn-lg">继续朗读</button>
-                <button id="pause" class="btn btn-outline-primary btn-lg">暂停朗读</button>
+                <button id="continue" class="btn btn-outline-primary btn-lg" onclick="continue_reading()">继续朗读</button>
+                <button id="pause" class="btn btn-outline-primary btn-lg" onclick="pause_reading()">暂停朗读</button>
             </div>
         </div>
     </div>
@@ -232,6 +232,17 @@
                 const dbSpl = dbfs + CALIBRATION_OFFSET_DB;
                 if (splDisplay) {
                     splDisplay.textContent = `${Math.round(dbSpl)} dB`;
+                    if (if_paused) {
+                        try {
+                            count++
+                            if (count % 2 == 0) {
+                                send_post("paused", dbSpl)
+                            }
+                        } catch (e) {
+                            console.error(e)
+                        }
+                        return;
+                    }
                     if (dbSpl >= window.threshold) {
                         if (timer_running) {
                             createThresholdTimer().clear()
@@ -395,8 +406,16 @@
             console.error("Fetch error:", error);
         });
     }
-    function pause() {
-        
+    function pause_reading() {
+        /* Set the flag to true */
+        if_paused = true;
+        /* Send a pause signal immediately to stop the backend processing */
+        send_post("paused", 0);
+    }
+
+    function continue_reading() {
+        /* Set the flag to false to resume normal processing */
+        if_paused = false;
     }
     </script>
 </body>

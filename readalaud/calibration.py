@@ -7,7 +7,7 @@ import json
 def bind_calibration_api(instance):
     instance.start_calibration = lambda: start_calibration(instance)
 
-HTML_FILE = "./calibration.html"
+HTML_FILE = ".web/calibration.html"
 def start_webview(queue, queue_state, current_acount):
     abs_path = os.path.abspath(HTML_FILE)
     url = f"file://{abs_path}"
