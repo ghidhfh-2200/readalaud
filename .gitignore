@@ -1,2 +1,9 @@
 *.pyc
 /vscode/
+/mainvenv/
+/blob_storage/
+/data/
+/details/
+/node_modules/
+/package-lock.json
+/package.json
