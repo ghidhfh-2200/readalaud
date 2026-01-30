@@ -1,5 +1,6 @@
 import pyttsx3
-
+import edge_tts
+import asyncio
 
 def bind_tts(instance):
     # bind web-voice fetcher
@@ -10,13 +11,16 @@ def bind_tts(instance):
 
 
 async def _get_web_voice(instance=None):
-    # Legacy API: web voices removed; keep shape for GUI callers.
-    return []
+    try:
+        return await edge_tts.list_voices()
+    except Exception:
+        return []
 
 
 def get_web_voices():
-    # Web/model-based voices were provided by external TTS libraries (removed).
-    return []
+    loop = asyncio.get_event_loop()
+    voices = loop.run_until_complete(_get_web_voice)
+    return voices
 
 
 def download_model(model_name):

@@ -32,6 +32,7 @@ def _generate_main_window(self):
         self.login_password_enter = tk.StringVar()
     if getattr(self, 'login_acount_enter', None) is None:
         self.login_acount_enter = tk.StringVar()
+    self.content = ""
     self.main_window.geometry("800x600")
     self.main_window.title("ReadAlaud——告别摸鱼偷懒，回归大声早读！")
     ttkbs.Style().theme_use(themename="darkly")
@@ -474,7 +475,7 @@ def _generate_more_vloices_window(self, source):
                 voices = loop.run_until_complete(_get_web_voice(self))
                 self.all_web_voices = voices
             except Exception:
-                messagebox.showerror(message="获取音色失败！\n当前仅支持本地 TTS（pyttsx3），请选用本地音色。")
+                messagebox.showerror(message="获取音色失败")
                 self.all_web_voices = None
                 return
         for voice in self.all_web_voices:
@@ -487,14 +488,8 @@ def _generate_more_vloices_window(self, source):
             self.voice_listbox.insert("", tk.END, values=(voice.name, voice.gender, voice.languages, "None"))
     button_lf = tk.LabelFrame(master=self.more_voices_window, border=0)
     button_lf.pack(fill="x")
-    if source == "web":
-        download_button = tk.Button(master=button_lf, text="下载模型", width=10, command=lambda: download_model_window(self))
-        download_button.pack(side="left", padx=5)
-        tips_label = tk.Label(button_lf, text="Web/模型音色已移除，仅支持本地 pyttsx3")
-        tips_label.pack(side="left")
-    else:
-        tips_label = tk.Label(button_lf, text="语言zh-CN为中文, en开头为英文")
-        tips_label.pack(side="left")
+    tips_label = tk.Label(button_lf, text="语言zh-CN为中文, en开头为英文")
+    tips_label.pack(side="left")
     ok_button = tk.Button(master=button_lf, text="确定", width=10, command=lambda: select_voices_ok(self=self, source=source, window=self.more_voices_window))
     ok_button.pack(side="right")
     self.more_voices_window.protocol("WM_DELETE_WINDOW", lambda: _destroy_all_voices_window(self, window=self.more_voices_window))
@@ -534,6 +529,7 @@ def on_treeview_click(self, event, item):
     self.volume_var.set(float(item[2]))
     self.speed_var.set(float(item[3]))
     self.voice_var.set(str(item[4]))
+    self.content = str(item[1])
 
 def volume_scale_change(self, event):
     """
@@ -743,12 +739,17 @@ def test_tts(self):
     """
     ask_if_continue = messagebox.askyesno(message=f"接下来将会生成语音文件进行测试\n请检查参数是否正确\n并决定是否继续")
     if ask_if_continue == True:
-        get_context = self.content
-        get_volume = float(self.volume_var.get())
-        get_speed = float(self.speed_var.get())
-        get_voice = self.voice_var.get()
-        get_source = self.tts_tree.selection()[0]
-        get_source = list(self.tts_tree.item(get_source, "values"))[5]
+        try:
+            get_context = self.content
+            get_volume = float(self.volume_var.get())
+            get_speed = float(self.speed_var.get())
+            get_voice = self.voice_var.get()
+            selected = self.tts_tree.selection()[0]
+            get_source = list(self.tts_tree.item(selected, "values"))[5]
+        except IndexError:
+            messagebox.showwarning(message="你还没有选择一个语音提示条目！")
+            return
+
         if get_context == "":
             messagebox.showwarning(message="检测到你的语音内容为空！")
             return
