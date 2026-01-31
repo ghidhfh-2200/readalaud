@@ -253,6 +253,11 @@ def data_thread(ipc_queue, ui_queue, instance):
     # Initialize timing with current time to calculate deltas
     last_process_time = time.time()
     
+    # Tracking for TTS
+    instance.tts_triggered_events = set()
+    instance.tts_cooldowns = {} # key: index, value: last_trigger_time
+    current_pause_start = None
+    
     while getattr(instance, 'if_reading', True):
         try:
             try:
@@ -285,6 +290,15 @@ def data_thread(ipc_queue, ui_queue, instance):
                     val_db = float(db_text)
                 except:
                     pass
+                
+                # Update State and Pause Tracking
+                current_pause_duration = 0.0
+                if get_state in ["db-paused", "paused", "pre-paused"]:
+                    if current_pause_start is None:
+                        current_pause_start = current_time
+                    current_pause_duration = current_time - current_pause_start
+                else:
+                     current_pause_start = None
                 
                 if get_state == "reading" or get_state == "pre-paused":
                     display_msg = f"正在朗读   {round(val_db, 1)} dB"
@@ -324,6 +338,21 @@ def data_thread(ipc_queue, ui_queue, instance):
                     instance.read_today_data['total'] = float(instance.read_today_data['total']) + time_delta
                     if float(instance.read_today_data['total']) > 0:
                         instance.read_today_data['efficiency'] = round(float(instance.read_today_data['real_read_time']) / float(instance.read_today_data['total']), 2)
+
+                # Check TTS Conditions
+                if instance.tts_read:
+                    check_tts_conditions(
+                        instance=instance,
+                        tts_config=instance.tts_read,
+                        current_db=val_db,
+                        current_pause_duration=current_pause_duration,
+                        left=instance.read_today_data['left'],
+                        total_stop=instance.read_today_data['stop_total'],
+                        total=instance.read_today_data['total'],
+                        real_read_time=instance.read_today_data['real_read_time'],
+                        max_db=instance.read_today_data['max_sound'],
+                        efficiency=instance.read_today_data['efficiency']
+                    )
 
                 update_payload = {
                     "type": "update",
@@ -456,6 +485,171 @@ def write_db_data(acount, db, date):
             write_db_data(acount=acount, db=db, date=date)
     except Exception as e:
         raise e
+    
+def _play_web_tts_cached(text, volume, speed, output_path):
+    """
+    Generate audio using edge-tts CLI if file doesn't exist, then play it.
+    Uses win32_playback from tts module logic if available.
+    """
+    try:
+        from readalaud.tts import play_mp3_win32
+    except ImportError:
+        play_mp3_win32 = None
+
+    if play_mp3_win32 is None:
+        print("edge_playback not available for web TTS")
+        return
+
+    # Check if file exists - Play directly if so
+    if os.path.exists(output_path):
+        try:
+            print('directly play')
+            play_mp3_win32(output_path)
+        except Exception as e:
+            print(f"Playback error (cached): {e}")
+        return
+
+    # Generate it
+    try:
+        try:
+            vol_str = f"{int((float(volume)) * 100):+d}%"
+        except Exception:
+            vol_str = "+0%"
+        try:
+            rate_str = f"{int((float(speed)) * 100):+d}%"
+        except Exception:
+            rate_str = "+0%"
+
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        cmd = ["edge-tts", "-t", str(text), "--write-media", output_path, f"--rate={rate_str}", f"--volume={vol_str}"]
+        
+        try:
+            # Hide console window on Windows
+            startupinfo = None
+            if platform.system() == "Windows":
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            
+            subprocess.run(cmd, check=True, timeout=60, startupinfo=startupinfo, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            print(f"Failed to generate TTS: {e}")
+            return
+        except Exception as e:
+            print(f"TTS Config Error: {e}")
+            return
+            
+        # Play instantly after generation
+        try:
+            t = threading.Thread(target=play_mp3_win32, args=(output_path,))
+            t.start()
+        except Exception as e:
+            print(f"Playback error: {e}")
+            
+    except Exception as e:
+        print(f"TTS Process Error: {e}")
+
+def check_tts_conditions(instance, tts_config, current_db, current_pause_duration, 
+                         left, total_stop, total, real_read_time, max_db, efficiency):
+    """
+    检查TTS触发条件
+    """
+    current_time = time.time()
+    
+    for index_key, config in tts_config.items():
+        try:
+            condition = config.get("condition")
+            target_value_str = config.get("value", "0")
+            target_value = float(target_value_str)
+            
+            # Cooldown check (default 10s for repetitive events)
+            last_trigger = instance.tts_cooldowns.get(index_key, 0)
+            
+            should_trigger = False
+            is_one_shot = False
+            
+            if condition == "当音量达到":
+                if current_db >= target_value:
+                    if current_time - last_trigger > 10:
+                        should_trigger = True
+            
+            elif condition == "当音量低于":
+                if current_db < target_value:
+                    if current_time - last_trigger > 10:
+                        should_trigger = True
+            
+            elif condition == "当达到目标":
+                # Assuming 'left' goes to 0 when goal reached. Or compare total/goal.
+                # If left <= 0, goal reached.
+                if left <= 0:
+                    is_one_shot = True
+                    should_trigger = True
+
+            elif condition == "当时间点达到":
+                # Value is in minutes. Compare with real_read_time (seconds).
+                target_seconds = target_value * 60
+                # Trigger if we just passed it (within a margin) or if we are past it and haven't triggered yet.
+                if real_read_time >= target_seconds:
+                    is_one_shot = True
+                    should_trigger = True
+
+            elif condition == "当任务进度达到":
+                # Value is percentage (0-100).
+                # We need goal. instance.load_settings['goal'] should exist.
+                # Calculate current %: real_read_time / goal * 100
+                goal_str = instance.load_settings.get('goal', 0) 
+                goal = float(goal_str) if goal_str else 0
+                if goal > 0:
+                    current_percent = (real_read_time / goal) * 100
+                    if current_percent >= target_value:
+                        is_one_shot = True
+                        should_trigger = True
+
+            elif condition == "检测到异常停顿":
+                # Value is seconds.
+                if current_pause_duration >= target_value:
+                    if current_time - last_trigger > (target_value + 10): # Cooldown: duration + buffer
+                        should_trigger = True
+
+            if should_trigger:
+                # Check one-shot history
+                if is_one_shot and index_key in instance.tts_triggered_events:
+                    continue
+
+                # Execute Trigger
+                instance.tts_cooldowns[index_key] = current_time
+                if is_one_shot:
+                    instance.tts_triggered_events.add(index_key)
+                
+                # Speak
+                source = config.get("source", "local")
+                text = config.get("text", "")
+                volume = config.get("volume", "1.0")
+                rate = config.get("rate", "1.0") # stored as speed
+                voice = config.get("voice", "")
+
+                if source == "web":
+                    # Generate/Play Web TTS
+                    # Path: ./data/{current_account}/tts/{index}.mp3
+                    account_dir = getattr(instance, "current_acount", "default")
+                    base_path = f"./data/{account_dir}/tts"
+                    file_path = os.path.abspath(os.path.join(base_path, f"{index_key}.mp3"))
+                    
+                    # Run in separate thread to avoid blocking data_thread
+                    # Although _play_web_tts_cached spawns a thread for playback, 
+                    # the generation (subprocess) might take a moment. 
+                    # Better to spawn a worker thread for the whole process.
+                    threading.Thread(target=_play_web_tts_cached, 
+                                     args=(text, volume, rate, file_path)).start()
+
+                else:
+                    # Local
+                    generate_tts_prompt(text, voice, volume, rate)
+
+        except Exception as e:
+            print(f"Error checking TTS condition {index_key}: {e}")
+            continue
+
 def generate_tts_prompt(text, voice, volume, speed):
     """Generate a TTS prompt using local pyttsx3 only."""
     return tts.speak(text=str(text), volume=float(volume), speed=float(speed), voice_name=str(voice))
