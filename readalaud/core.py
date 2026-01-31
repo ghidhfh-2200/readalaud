@@ -37,4 +37,5 @@ class ReadAlaud:
         # login StringVars will be created when the GUI root exists (in _generate_main_window)
         self.login_password_enter = None
         self.login_acount_enter = None
+        self.if_generating_ttstest = False
 

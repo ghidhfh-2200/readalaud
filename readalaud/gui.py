@@ -432,9 +432,9 @@ def _enable_or_disable_tts_gui(self, state=None):
             self.more_local_button.config(state="active")
 
 
-async def _get_web_voice(self):
+def _get_web_voice(self):
     # Use the built-in, stable Baidu voice presets
-    return tts.get_web_voices()
+    return ['EdgeTTS 暂时不支持选择语音']
 
 
 def _generate_more_vloices_window(self, source):
@@ -442,6 +442,15 @@ def _generate_more_vloices_window(self, source):
     生成更多音色窗口
     """
     if self.if_all_voices_window_showed == True:
+        return
+    if source == "web":
+        messagebox.showinfo(message="已切换到EdgeTTS！\nEdgeTTS暂不支持更换语音")
+        get_tts_selected = self.tts_tree.selection()[0]
+        current_values = list(self.tts_tree.item(get_tts_selected, "values"))
+        current_values[4] = "EdgeTTS Default"
+        current_values[5] = source
+        self.tts_tree.item(get_tts_selected, values=current_values)
+        self.voice_menu.configure(text="EdgeTTS Default")
         return
     self.if_all_voices_window_showed = True
     self.more_voices_window = tk.Toplevel(self.main_window)
@@ -468,19 +477,7 @@ def _generate_more_vloices_window(self, source):
     tree_scroll.config(command=self.voice_listbox.yview)
 
     self.voice_listbox.pack(fill="x", expand=True, side="top", padx=5)
-    if source == "web":
-        if self.all_web_voices == None:
-            try:
-                loop = asyncio.get_event_loop()
-                voices = loop.run_until_complete(_get_web_voice(self))
-                self.all_web_voices = voices
-            except Exception:
-                messagebox.showerror(message="获取音色失败")
-                self.all_web_voices = None
-                return
-        for voice in self.all_web_voices:
-            self.voice_listbox.insert("", tk.END, values=(voice["ShortName"], voice['Gender'], voice['Locale'], voice['VoiceTag']['VoicePersonalities']))
-    elif source == "local":
+    if source == "local":
         if self.all_local_voices == None:
             self.pyttsx3_engine = pyttsx3.init()
             self.all_local_voices = self.pyttsx3_engine.getProperty("voices")
@@ -490,11 +487,11 @@ def _generate_more_vloices_window(self, source):
     button_lf.pack(fill="x")
     tips_label = tk.Label(button_lf, text="语言zh-CN为中文, en开头为英文")
     tips_label.pack(side="left")
-    ok_button = tk.Button(master=button_lf, text="确定", width=10, command=lambda: select_voices_ok(self=self, source=source, window=self.more_voices_window))
+    ok_button = tk.Button(master=button_lf, text="确定", width=10, command=lambda: select_voices_ok(self=self, source=source))
     ok_button.pack(side="right")
-    self.more_voices_window.protocol("WM_DELETE_WINDOW", lambda: _destroy_all_voices_window(self, window=self.more_voices_window))
+    self.more_voices_window.protocol("WM_DELETE_WINDOW", lambda: _destroy_all_voices_window(self))
 
-def select_voices_ok(self, source, window):
+def select_voices_ok(self, source):
     try:
         selected = self.voice_listbox.selection()[0]
         voice_name = self.voice_listbox.item(selected, "values")[0]
@@ -503,9 +500,12 @@ def select_voices_ok(self, source, window):
     try:
         self.voice_var.set(voice_name)
         get_tts_selected = self.tts_tree.selection()[0]
-        _destroy_all_voices_window(self, window=window)
+        _destroy_all_voices_window(self)
         current_values = list(self.tts_tree.item(get_tts_selected, "values"))
-        current_values[4] = voice_name
+        if source == "web":
+            current_values[4] = "EdgeTTS Default"
+        else:
+            current_values[4] = voice_name
         current_values[5] = source
         self.tts_tree.item(get_tts_selected, values=current_values)
     except IndexError as e:
@@ -514,9 +514,7 @@ def select_voices_ok(self, source, window):
 
 def _destroy_all_voices_window(self):
     self.more_voices_window.destroy()
-def download_model_window(self):
-    messagebox.showinfo("提示", "已移除外部/模型 TTS 的模型下载功能（仅保留 pyttsx3）。")
-    return
+    self.if_all_voices_window_showed = False
 
 
 def _tts_add_point(self):
@@ -737,6 +735,10 @@ def test_tts(self):
     """
     语音生成器测试GUI对接
     """
+    if self.if_generating_ttstest == True:
+        return
+    else:
+        self.if_generating_ttstest = True
     ask_if_continue = messagebox.askyesno(message=f"接下来将会生成语音文件进行测试\n请检查参数是否正确\n并决定是否继续")
     if ask_if_continue == True:
         try:
@@ -747,20 +749,26 @@ def test_tts(self):
             selected = self.tts_tree.selection()[0]
             get_source = list(self.tts_tree.item(selected, "values"))[5]
         except IndexError:
+            self.if_generating_ttstest = False
             messagebox.showwarning(message="你还没有选择一个语音提示条目！")
             return
 
         if get_context == "":
+            self.if_generating_ttstest = False
             messagebox.showwarning(message="检测到你的语音内容为空！")
             return
+
+        def on_complete():
+            self.if_generating_ttstest = False
+
         loop = asyncio.get_event_loop()  
-        result =loop.run_until_complete(tts.test_tts(args=[get_context, get_volume, get_speed, get_voice, get_source], current_account=self.current_acount))
+        result =loop.run_until_complete(tts.test_tts(args=[get_context, get_volume, get_speed, get_voice, get_source], current_account=self.current_acount, on_finish=on_complete))
         if result == "ok":
             pass
         else:
             messagebox.showerror(message=f"语音生成模块返回报错:{result}")
     else:
-        pass
+        self.if_generating_ttstest = False
 
 def save_tts_setting(self):
     items = self.tts_tree.get_children()
