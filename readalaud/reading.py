@@ -1,5 +1,6 @@
 import datetime
 import json
+import queue
 from tkinter import messagebox
 import tkinter as tk
 import os
@@ -97,7 +98,7 @@ def reading_data_get_and_check(self):
                     self.information_label_list[1].configure(text=f"停顿总时长: {datetime.timedelta(seconds=float(self.read_today_data['stop_total']))}")
                     self.information_label_list[2].configure(text=f"有效朗读时间: {datetime.timedelta(seconds=float(self.read_today_data['real_read_time']))}")
                     self.information_label_list[3].configure(text=f"总时长: {datetime.timedelta(seconds=float(self.read_today_data['total']))}")
-                    self.information_label_list[4].configure(text=f"最大音量: {datetime.timedelta(seconds=float(self.read_today_data['max_sound']))}")
+                    self.information_label_list[4].configure(text=f"最大音量: {float(self.read_today_data['max_sound'])}")
                     self.information_label_list[5].configure(text=f"效率: {self.read_today_data['efficiency']}")
                     self.labels_list[0].configure(text=f"朗读目标: {datetime.timedelta(seconds=float(self.load_settings['goal']))}")
                     self.labels_list[1].configure(text=f"声音阈值: {self.load_settings['db-level']}")
@@ -245,119 +246,186 @@ def WriteCountDbWrite(db_list, acount):
     get_date = datetime.datetime.now().strftime('%Y-%m-%d')
     write_db_data(acount=acount, db=db_list, date=get_date)
 
-def roll_check(state, queue, information_label_list,instance):
-    # instance.if_reading is used to control the loop; the thread will set
-    # it to False when an end signal is received.
+def data_thread(ipc_queue, ui_queue, instance):
     write_count = 0
     db_list = []
+    
+    # Initialize timing with current time to calculate deltas
+    last_process_time = time.time()
+    
     while getattr(instance, 'if_reading', True):
-        print("write_count" + str(write_count))
-        # Removed unused variable current_account
         try:
-            # 使用带超时的 get，以便可以及时响应停止信号
             try:
-                data = queue.get(timeout=1)
+                data = ipc_queue.get(timeout=1)
             except Exception:
-                # 超时或其他获取异常，继续循环检查停止标志
                 continue
+                
             if not data:
                 continue
+
             if "broadcast" in data:
+                current_time = time.time()
+                time_delta = int(current_time - last_process_time)
+                last_process_time = current_time
+                
+                # Cap extremely large deltas (e.g., system sleep or long disconnect) to avoid massive jumps
+                # Assuming max reasonable lag is 5 seconds.
+                if time_delta > 5.0:
+                    time_delta = 1.0 # Fallback to 1s if sync lost significantly? Or just cap at 5?
+                    # Let's assume valid data flows continuously.
+
+                db_text = data['broadcast'].get('db', '')
+                get_state = data['broadcast'].get('state', '')
+                
+                display_msg = ""
+                should_update_stats = False
+                
+                val_db = 0.0
                 try:
-                    print("in broadcast")
-                    db_text = data['broadcast'].get('db', '')
-                    get_state = data['broadcast'].get('state', '')
-                    # 通过主线程安全地更新 UI
-                    try:
-                        if get_state == "reading" or get_state == "pre-paused":
-                            state.after(0, lambda s=state: s.config(text=f"正在朗读   {round(float(db_text),1)} dB"))
-                            if float(round(float(db_text),1)) > float(instance.read_today_data['max_sound']):
-                                instance.read_today_data['max_sound'] = float(round(float(db_text), 1))
-                            if write_count < 10:
-                                write_count += 1
-                                db_list.append(round(float(db_text),3))
-                            elif write_count >= 10:
-                                WriteCountDbWrite(db_list=db_list, acount=getattr(instance, "current_acount"))
-                                write_count = 0
-                                db_list = []
-                            instance.read_today_data['left'] = float(instance.read_today_data['left']) - 1
-                            instance.read_today_data['real_read_time'] = float(instance.read_today_data['real_read_time']) +1
-                            instance.read_today_data['total'] = float(instance.read_today_data['total']) + 1
-                            instance.read_today_data['efficiency'] = round(float(instance.read_today_data['real_read_time']) / float(instance.read_today_data['total']),2)
-                            for i, label in enumerate(information_label_list):
-                                state.after(0, lambda lbl=label, idx=i: lbl.configure(
-                                    text=[
-                                        f"剩余时长: {datetime.timedelta(seconds=float(instance.read_today_data['left']))}",
-                                        f"停顿总时长: {datetime.timedelta(seconds=float(instance.read_today_data['stop_total']))}",
-                                        f"有效朗读时间: {datetime.timedelta(seconds=float(instance.read_today_data['real_read_time']))}",
-                                        f"总时长: {datetime.timedelta(seconds=float(instance.read_today_data['total']))}",
-                                        f"最大音量: {instance.read_today_data['max_sound']}",
-                                        f"效率: {instance.read_today_data['efficiency']}"
-                                    ][idx]
-                                ))
-                        elif get_state == "db-paused":
-                            state.after(0, lambda s=state: s.config(text=f"停顿   {round(float(db_text),1)} dB"))
-                            if write_count < 10:
-                                write_count += 1
-                                db_list.append(round(float(db_text),3))
-                            elif write_count >= 10:
-                                WriteCountDbWrite(db_list=db_list, acount=getattr(instance, "current_acount"))
-                                write_count = 0
-                                db_list = []
-                            instance.read_today_data['stop_total'] = float(instance.read_today_data['stop_total']) +1
-                            instance.read_today_data['total'] = float(instance.read_today_data['total']) + 1
-                            instance.read_today_data['efficiency'] = round(float(instance.read_today_data['real_read_time']) / float(instance.read_today_data['total']),2)
-                            for i, label in enumerate(information_label_list):
-                                state.after(0, lambda lbl=label, idx=i: lbl.configure(
-                                    text=[
-                                        f"剩余时长: {datetime.timedelta(seconds=float(instance.read_today_data['left']))}",
-                                        f"停顿总时长: {datetime.timedelta(seconds=float(instance.read_today_data['stop_total']))}",
-                                        f"有效朗读时间: {datetime.timedelta(seconds=float(instance.read_today_data['real_read_time']))}",
-                                        f"总时长: {datetime.timedelta(seconds=float(instance.read_today_data['total']))}",
-                                        f"最大音量: {instance.read_today_data['max_sound']}",
-                                        f"效率: {instance.read_today_data['efficiency']}"
-                                    ][idx]
-                                ))
-                        elif get_state == "paused":
-                            # Handle paused state: Update total time and efficiency, show "Paused"
-                            try:
-                                state.after(0, lambda s=state: s.config(text="已暂停"))
-
-                                # Increment total time
-                                instance.read_today_data['total'] = float(instance.read_today_data['total']) + 1
-                                
-                                # Recalculate efficiency
-                                if float(instance.read_today_data['total']) > 0:
-                                    instance.read_today_data['efficiency'] = round(float(instance.read_today_data['real_read_time']) / float(instance.read_today_data['total']), 2)
-
-                                # Update UI labels using the existing logic
-                                for i, label in enumerate(information_label_list):
-                                    state.after(0, lambda lbl=label, idx=i: lbl.configure(
-                                        text=[
-                                            f"剩余时长: {datetime.timedelta(seconds=float(instance.read_today_data['left']))}",
-                                            f"停顿总时长: {datetime.timedelta(seconds=float(instance.read_today_data['stop_total']))}",
-                                            f"有效朗读时间: {datetime.timedelta(seconds=float(instance.read_today_data['real_read_time']))}",
-                                            f"总时长: {datetime.timedelta(seconds=float(instance.read_today_data['total']))}",
-                                            f"最大音量: {instance.read_today_data['max_sound']}",
-                                            f"效率: {instance.read_today_data['efficiency']}"
-                                        ][idx]
-                                    ))
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
-                except Exception:
+                    val_db = float(db_text)
+                except:
                     pass
+                
+                if get_state == "reading" or get_state == "pre-paused":
+                    display_msg = f"正在朗读   {round(val_db, 1)} dB"
+                    if float(round(val_db, 1)) > float(instance.read_today_data['max_sound']):
+                        instance.read_today_data['max_sound'] = float(round(val_db, 1))
+                    
+                    if write_count < 10:
+                        write_count += 1
+                        db_list.append(round(val_db, 3))
+                    elif write_count >= 10:
+                        WriteCountDbWrite(db_list=db_list, acount=getattr(instance, "current_acount"))
+                        write_count = 0
+                        db_list = []
+                    
+                    instance.read_today_data['left'] = float(instance.read_today_data['left']) - time_delta
+                    instance.read_today_data['real_read_time'] = float(instance.read_today_data['real_read_time']) + time_delta
+                    should_update_stats = True
+                        
+                elif get_state == "db-paused":
+                    display_msg = f"停顿   {round(val_db, 1)} dB"
+                    if write_count < 10:
+                        write_count += 1
+                        db_list.append(round(val_db, 3))
+                    elif write_count >= 10:
+                        WriteCountDbWrite(db_list=db_list, acount=getattr(instance, "current_acount"))
+                        write_count = 0
+                        db_list = []
+                        
+                    instance.read_today_data['stop_total'] = float(instance.read_today_data['stop_total']) + time_delta
+                    should_update_stats = True
+
+                elif get_state == "paused":
+                    display_msg = "已暂停"
+                    should_update_stats = True
+
+                if should_update_stats:
+                    instance.read_today_data['total'] = float(instance.read_today_data['total']) + time_delta
+                    if float(instance.read_today_data['total']) > 0:
+                        instance.read_today_data['efficiency'] = round(float(instance.read_today_data['real_read_time']) / float(instance.read_today_data['total']), 2)
+
+                update_payload = {
+                    "type": "update",
+                    "main_label_text": display_msg,
+                    "info_data": {
+                        "left": instance.read_today_data['left'],
+                        "stop_total": instance.read_today_data['stop_total'],
+                        "real_read_time": instance.read_today_data['real_read_time'],
+                        "total": instance.read_today_data['total'],
+                        "max_sound": instance.read_today_data['max_sound'],
+                        "efficiency": instance.read_today_data['efficiency']
+                    }
+                }
+                ui_queue.put(update_payload)
+
             if "end_sig" in data:
                 instance.if_reading = False
-                try:
-                    state.after(0, lambda s=state: s.config(text="已停止"))
-                except Exception:
-                    pass
+                ui_queue.put({"type": "stop"})
+                current_account = getattr(instance, "current_acount")
+                get_date = datetime.datetime.now().strftime('%Y-%m-%d')
+                write_data = write_data = {"left": int(instance.read_today_data['left']), 
+                                           "stop_total": int(instance.read_today_data['stop_total']), 
+                                           "real_read_time": int(instance.read_today_data['real_read_time']),
+                                           "total": int(instance.read_today_data['total']), 
+                                           "max_sound": float(instance.read_today_data['max_sound']), 
+                                           "efficiency": float(instance.read_today_data['efficiency'])}
+                with open(f"./data/{current_account}/{'-'.join(get_date.split('-')[0:2])}/{get_date}.json", "w", encoding="utf-8") as f:
+                    json.dump(write_data, f)
                 break
+
         except Exception as e:
-            print(f"Error checking Queue: {e}")
+            print(f"Error in data_thread: {e}")
             break
+
+def ui_thread(ui_queue, state_label, information_label_list):
+    while True:
+        try:
+            msg = ui_queue.get()
+            msg_type = msg.get("type")
+            
+            if msg_type == "stop":
+                state_label.after(0, lambda: state_label.config(text="已停止"))
+                break
+            
+            if msg_type == "update":
+                main_text = msg.get("main_label_text")
+                info = msg.get("info_data")
+                
+                if main_text:
+                    state_label.after(0, lambda t=main_text: state_label.config(text=t))
+                
+                if info:
+                    texts = [
+                        f"剩余时长: {datetime.timedelta(seconds=float(info['left']))}",
+                        f"停顿总时长: {datetime.timedelta(seconds=float(info['stop_total']))}",
+                        f"有效朗读时间: {datetime.timedelta(seconds=float(info['real_read_time']))}",
+                        f"总时长: {datetime.timedelta(seconds=float(info['total']))}",
+                        f"最大音量: {info['max_sound']}",
+                        f"效率: {info['efficiency']}"
+                    ]
+                    
+                    for i, label in enumerate(information_label_list):
+                        if i < len(texts):
+                            state_label.after(0, lambda lb=label, tx=texts[i]: lb.configure(text=tx))
+                            
+        except Exception as e:
+            print(f"Error in ui_thread: {e}")
+            break
+
+def roll_check(state, queue_ipc, information_label_list, instance):
+    internal_ui_queue = queue.Queue()
+    
+    # Assign threads to instance so they can be tracked if needed
+    instance.thread_data = threading.Thread(target=data_thread, args=(queue_ipc, internal_ui_queue, instance))
+    instance.thread_ui = threading.Thread(target=ui_thread, args=(internal_ui_queue, state, information_label_list))
+    
+    instance.thread_data.daemon = True
+    instance.thread_ui.daemon = True
+    
+    instance.thread_data.start()
+    instance.thread_ui.start()
+    
+    # Monitor loop instead of blocking join
+    # This keeps the roll_check thread alive to satisfy is_alive() checks in start_reading
+    # but actively checks for the reading state and worker health.
+    while getattr(instance, 'if_reading', True):
+        if not instance.thread_data.is_alive():
+            # If data thread dies/exits, we should stop
+            break
+        time.sleep(0.5)
+
+    # Cleanup
+    instance.if_reading = False
+    # Wait briefly for threads to finish their loops if they are still running
+    if instance.thread_data.is_alive():
+        instance.thread_data.join(timeout=1.0)
+    if instance.thread_ui.is_alive():
+        # Optimization: UI thread blocks on queue.get(). 
+        # Sending a stop signal is handled by data_thread sending "stop" or we inject it here if needed.
+        # But if data_thread is dead, we might need to push 'stop' manually if it crashed.
+        internal_ui_queue.put({"type": "stop"})
+        instance.thread_ui.join(timeout=1.0)
 
 def write_db_data(acount, db, date):
     try:
