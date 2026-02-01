@@ -257,6 +257,7 @@ def data_thread(ipc_queue, ui_queue, instance):
     instance.tts_triggered_events = set()
     instance.tts_cooldowns = {} # key: index, value: last_trigger_time
     current_pause_start = None
+    last_ui_update_time = 0
     
     while getattr(instance, 'if_reading', True):
         try:
@@ -270,7 +271,7 @@ def data_thread(ipc_queue, ui_queue, instance):
 
             if "broadcast" in data:
                 current_time = time.time()
-                time_delta = int(current_time - last_process_time)
+                time_delta = current_time - last_process_time
                 last_process_time = current_time
                 
                 # Cap extremely large deltas (e.g., system sleep or long disconnect) to avoid massive jumps
@@ -356,8 +357,12 @@ def data_thread(ipc_queue, ui_queue, instance):
 
                 update_payload = {
                     "type": "update",
-                    "main_label_text": display_msg,
-                    "info_data": {
+                    "main_label_text": display_msg
+                }
+
+                if current_time - last_ui_update_time >= 0.1:
+                    last_ui_update_time = current_time
+                    update_payload["info_data"] = {
                         "left": instance.read_today_data['left'],
                         "stop_total": instance.read_today_data['stop_total'],
                         "real_read_time": instance.read_today_data['real_read_time'],
@@ -365,7 +370,7 @@ def data_thread(ipc_queue, ui_queue, instance):
                         "max_sound": instance.read_today_data['max_sound'],
                         "efficiency": instance.read_today_data['efficiency']
                     }
-                }
+
                 ui_queue.put(update_payload)
 
             if "end_sig" in data:
@@ -406,10 +411,10 @@ def ui_thread(ui_queue, state_label, information_label_list):
                 
                 if info:
                     texts = [
-                        f"剩余时长: {datetime.timedelta(seconds=float(info['left']))}",
-                        f"停顿总时长: {datetime.timedelta(seconds=float(info['stop_total']))}",
-                        f"有效朗读时间: {datetime.timedelta(seconds=float(info['real_read_time']))}",
-                        f"总时长: {datetime.timedelta(seconds=float(info['total']))}",
+                        f"剩余时长: {datetime.timedelta(seconds=int(info['left']))}",
+                        f"停顿总时长: {datetime.timedelta(seconds=int(info['stop_total']))}",
+                        f"有效朗读时间: {datetime.timedelta(seconds=int(info['real_read_time']))}",
+                        f"总时长: {datetime.timedelta(seconds=int(info['total']))}",
                         f"最大音量: {info['max_sound']}",
                         f"效率: {info['efficiency']}"
                     ]

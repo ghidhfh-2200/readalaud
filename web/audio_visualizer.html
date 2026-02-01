@@ -86,6 +86,10 @@
     const splDisplay = document.getElementById('spl_value');
     let CALIBRATION_OFFSET_DB = 0;
     let if_paused = false;
+
+    // WebSocket streaming
+    let audioSocket = null;
+    let audioProcessor = null;
     
     // 设置Canvas尺寸为窗口大小
     function resizeCanvas() {
@@ -110,7 +114,7 @@
     
     // 初始化音频分析器
     function initAudio() {
-        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
         analyser = audioContext.createAnalyser();
         analyser.fftSize = 512;
         
@@ -136,6 +140,18 @@
             clearInterval(workerTimer);
             workerTimer = null;
         }
+        
+        // Clean up Streaming
+        if (audioProcessor) {
+            audioProcessor.disconnect();
+            audioProcessor.onaudioprocess = null;
+            audioProcessor = null;
+        }
+        if (audioSocket) {
+            audioSocket.close();
+            audioSocket = null;
+        }
+
         isActive = false;
     }
     
@@ -214,6 +230,45 @@
 
             microphone = audioContext.createMediaStreamSource(stream);
             microphone.connect(analyser);
+
+            // --- STREAMING LOGIC ---
+            if (!audioSocket || audioSocket.readyState === WebSocket.CLOSED) {
+                audioSocket = new WebSocket("ws://127.0.0.1:8008/audio_stream");
+                audioSocket.onopen = () => console.log("Audio Stream Connected");
+                audioSocket.onerror = (e) => console.error("WebSocket Error:", e);
+            }
+
+            if (audioProcessor) {
+                audioProcessor.disconnect();
+                audioProcessor.onaudioprocess = null;
+            }
+
+            // Create a ScriptProcessorNode to capture raw audio data
+            audioProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+            microphone.connect(audioProcessor);
+
+            // Connect to destination to keep the processor alive, but use a GainNode to mute feedback
+            const muteGain = audioContext.createGain();
+            muteGain.gain.value = 0;
+            audioProcessor.connect(muteGain);
+            muteGain.connect(audioContext.destination);
+
+            audioProcessor.onaudioprocess = (e) => {
+                if (!isActive || if_paused || !audioSocket || audioSocket.readyState !== WebSocket.OPEN) return;
+
+                const inputData = e.inputBuffer.getChannelData(0); // Float32
+
+                // Convert Float32 to Int16 (PCM)
+                const pcmBuffer = new Int16Array(inputData.length);
+                for (let i = 0; i < inputData.length; i++) {
+                    let s = Math.max(-1, Math.min(1, inputData[i]));
+                    pcmBuffer[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                }
+
+                // Send binary data
+                audioSocket.send(pcmBuffer.buffer);
+            };
+            // -----------------------
 
             isActive = true;
 
