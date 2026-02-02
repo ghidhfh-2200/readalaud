@@ -87,7 +87,8 @@ def start_socket_server(queue=None):
         
         read_file_name = os.listdir(output_dir)
         index_list = []
-        if read_file_name is not []:
+        print("read_file_name:"+ str(read_file_name))
+        if read_file_name != []:
             for i in range(len(read_file_name)):
                 index_list.append(int(read_file_name[i].split("_")[1].split(".")[0]))
             index_list.sort()
