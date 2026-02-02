@@ -80,7 +80,7 @@
     let timeDomainArray;
     let animationId;
     let isActive = false;
-    let previousData = [];
+    let previousData = null; // Initialize as null, will be Uint8Array
     let processTimer = null; // 新增：processAudio 定时器句柄
     let workerTimer = null;  // 新增：worker_data 定时器句柄
     const splDisplay = document.getElementById('spl_value');
@@ -90,6 +90,9 @@
     // WebSocket streaming
     let audioSocket = null;
     let audioProcessor = null;
+    let pcmBuffer = null; // Reusable PCM buffer
+    let workerBlobURL = null; // Store for cleanup
+    let worker = null;
     
     // 设置Canvas尺寸为窗口大小
     function resizeCanvas() {
@@ -120,9 +123,14 @@
         
         const bufferLength = analyser.frequencyBinCount;
         dataArray = new Uint8Array(bufferLength);
-        previousData = new Array(bufferLength).fill(0);
+        if (!previousData || previousData.length !== bufferLength) {
+            previousData = new Uint8Array(bufferLength); // Use TypedArray instead of Array
+        }
         // 时域缓冲长度使用 fftSize
-        timeDomainArray = new Float32Array(analyser.fftSize);
+        const fftSize = analyser.fftSize;
+        if (!timeDomainArray || timeDomainArray.length !== fftSize) {
+            timeDomainArray = new Float32Array(fftSize);
+        }
     }
     
     // 停止可视化
@@ -141,6 +149,16 @@
             workerTimer = null;
         }
         
+        // Clean up Worker
+        if (worker) {
+            worker.terminate();
+            worker = null;
+        }
+        if (workerBlobURL) {
+            URL.revokeObjectURL(workerBlobURL);
+            workerBlobURL = null;
+        }
+        
         // Clean up Streaming
         if (audioProcessor) {
             audioProcessor.disconnect();
@@ -151,61 +169,85 @@
             audioSocket.close();
             audioSocket = null;
         }
+        
+        // Clear reusable buffers
+        pcmBuffer = null;
 
         isActive = false;
     }
     
-    // Web Worker script as a string
+    // Web Worker script as a string - optimized to reuse arrays
     const workerScript = `
-        let previousData = [];
+        // Store previous smoothed values in Q8.8 fixed-point (Uint16) to avoid Float32Array
+        // Memory per bin: prev 2 bytes + out 1 byte = 3 bytes/bin (very small)
+        let prevQ88 = null;   // Uint16Array
+        let outU8 = null;     // Uint8Array
+
+        // Weights in Q0.8: 0.3 ~= 77/256, 0.7 ~= 179/256
+        const A = 77;
+        const B = 179;
+
         onmessage = (event) => {
-            const dataArray = event.data;
-            if (previousData.length !== dataArray.length) {
-                previousData = new Array(dataArray.length).fill(0);
+            const inU8 = event.data; // EXPECTED: Uint8Array
+            const n = inU8.length | 0;
+
+            if (!prevQ88 || prevQ88.length !== n) {
+                prevQ88 = new Uint16Array(n);
+                outU8 = new Uint8Array(n);
             }
-            const smoothedData = dataArray.map((value, index) => {
-                const smoothed = (value * 0.3) + (previousData[index] * 0.7);
-                previousData[index] = smoothed;
-                return smoothed;
-            });
-            postMessage(smoothedData);
+
+            for (let i = 0; i < n; i++) {
+                const inQ88 = inU8[i] << 8; // convert input to Q8.8
+                const smQ88 = (inQ88 * A + prevQ88[i] * B) >> 8; // back to Q8.8
+                prevQ88[i] = smQ88;
+                outU8[i] = smQ88 >> 8; // back to 0..255
+            }
+
+            postMessage(outU8); // reused; avoids allocating a new array each frame
         };
     `;
 
     // Create a Blob URL for the worker
     const workerBlob = new Blob([workerScript], { type: 'application/javascript' });
-    const workerBlobURL = URL.createObjectURL(workerBlob);
+    workerBlobURL = URL.createObjectURL(workerBlob);
 
     // Initialize the Web Worker using the Blob URL
-    let worker = new Worker(workerBlobURL);
+    worker = new Worker(workerBlobURL);
 
     // Limit refresh rate to 30 FPS
     const FRAME_INTERVAL = 1000 / 40;
     let lastFrameTime = 0;
 
-    // Modify drawVisualization to use worker data
+    // Modify drawVisualization to use worker data - optimized for memory
     function drawVisualization(processedData) {
         const now = performance.now();
         if (now - lastFrameTime < FRAME_INTERVAL) return;
         lastFrameTime = now;
 
+        // Use clearRect instead of fillRect for better performance
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
         const barWidth = (canvas.width / processedData.length) * 2.5;
+        const dataLength = processedData.length;
+        const heightScale = canvas.height / 255;
+        const hueStep = 200 / dataLength;
         let x = 0;
+        let hue, alpha, barHeight, y;
 
-        for (let i = 0; i < processedData.length; i++) {
-            const barHeight = (processedData[i] / 255) * canvas.height;
-            const hue = 180 + (i / processedData.length) * 200;
-            const alpha = 0.6 + (processedData[i] / 255) * 0.4;
-            ctx.fillStyle = `hsla(${hue}, 100%, 50%, ${alpha})`;
-
-            const y = canvas.height - barHeight;
+        for (let i = 0; i < dataLength; i++) {
+            barHeight = processedData[i] * heightScale;
+            hue = 180 + (i * hueStep);
+            alpha = 0.6 + (processedData[i] / 255) * 0.4;
+            
+            // Reuse fillStyle string building
+            ctx.fillStyle = `hsla(${hue},100%,50%,${alpha})`;
+            y = canvas.height - barHeight;
             ctx.fillRect(x, y, barWidth, barHeight);
 
             if (barHeight > 5) {
-                ctx.fillStyle = `hsla(${hue}, 100%, 80%, ${alpha * 0.8})`;
+                ctx.fillStyle = `hsla(${hue},100%,80%,${alpha * 0.8})`;
                 ctx.fillRect(x, y, barWidth, Math.max(2, barHeight * 0.15));
             }
 
@@ -257,15 +299,20 @@
                 if (!isActive || if_paused || !audioSocket || audioSocket.readyState !== WebSocket.OPEN) return;
 
                 const inputData = e.inputBuffer.getChannelData(0); // Float32
+                const inputLength = inputData.length;
 
-                // Convert Float32 to Int16 (PCM)
-                const pcmBuffer = new Int16Array(inputData.length);
-                for (let i = 0; i < inputData.length; i++) {
-                    let s = Math.max(-1, Math.min(1, inputData[i]));
+                // Reuse PCM buffer instead of creating new one each frame
+                if (!pcmBuffer || pcmBuffer.length !== inputLength) {
+                    pcmBuffer = new Int16Array(inputLength);
+                }
+
+                // Convert Float32 to Int16 (PCM) - optimized loop
+                for (let i = 0; i < inputLength; i++) {
+                    const s = Math.max(-1, Math.min(1, inputData[i]));
                     pcmBuffer[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
                 }
 
-                // Send binary data
+                // Send binary data using transferable to avoid copy
                 audioSocket.send(pcmBuffer.buffer);
             };
             // -----------------------
@@ -278,11 +325,14 @@
 
                 analyser.getFloatTimeDomainData(timeDomainArray);
                 let sumSquares = 0;
-                for (let i = 0; i < timeDomainArray.length; i++) {
+                const timeLength = timeDomainArray.length;
+                const invLength = 1 / timeLength;
+                // Optimized loop - avoid repeated length access
+                for (let i = 0; i < timeLength; i++) {
                     const s = timeDomainArray[i];
                     sumSquares += s * s;
                 }
-                const rms = Math.sqrt(sumSquares / timeDomainArray.length) || Number.EPSILON;
+                const rms = Math.sqrt(sumSquares * invLength) || Number.EPSILON;
                 const dbfs = 20 * (Math.log10 ? Math.log10(rms) : Math.log(rms) / Math.LN10);
                 const dbSpl = dbfs + CALIBRATION_OFFSET_DB;
                 if (splDisplay) {
@@ -340,8 +390,9 @@
                 if (!isActive) return;
                 // 每次发送前先获取最新频谱数据
                 analyser.getByteFrequencyData(dataArray);
-                // 发送副本，避免在主线程和 worker 之间共享同一缓冲导致竞态
-                worker.postMessage(dataArray.slice());
+                // Create copy and send with transferable (avoids slice overhead, transfers ownership)
+                const bufferCopy = new Uint8Array(dataArray);
+                worker.postMessage(bufferCopy, [bufferCopy.buffer]);
             }
             //独立启动read_timer,发送朗读计时数据到服务器
             // 用独立的定时器分别调度，互不影响
