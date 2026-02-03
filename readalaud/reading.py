@@ -12,6 +12,7 @@ import pathlib
 import threading
 import time
 import csv
+import wave
 from . import tts
 
 def bind_reading_api(instance):
@@ -386,11 +387,37 @@ def data_thread(ipc_queue, ui_queue, instance):
                                            "efficiency": float(instance.read_today_data['efficiency'])}
                 with open(f"./data/{current_account}/{'-'.join(get_date.split('-')[0:2])}/{get_date}.json", "w", encoding="utf-8") as f:
                     json.dump(write_data, f)
+                list_chunks = os.listdir("./audio_chunks")
+                merge_wav(list_chunks, f"./details/{current_account}/{get_date}/recording.wav")
                 break
 
         except Exception as e:
             print(f"Error in data_thread: {e}")
             break
+
+def read_wav(file_path):
+    wav = wave.open(file_path, 'rb')
+    params = wav.getparams()
+    frames = wav.readframes(wav.getnframes())
+    wav.close()
+    return params, frames
+
+def merge_wav(wav_list, output_file):
+    merged_params = None
+    merged_frames = b''
+
+    for i in range(len(wav_list)):
+        wav_list[i] = "./audio_chunks/" + wav_list[i]
+    for file in wav_list:
+        params, frames = read_wav(file)
+        if merged_params is None:
+            merged_params = params
+        merged_frames += frames
+
+    merged_wav = wave.open(output_file, 'wb')
+    merged_wav.setparams(merged_params)
+    merged_wav.writeframes(merged_frames)
+    merged_wav.close()
 
 def ui_thread(ui_queue, state_label, information_label_list):
     while True:
