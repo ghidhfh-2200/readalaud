@@ -95,7 +95,7 @@ def _welcome_page(self, destroy_window):
         read_button.pack(fill=tk.BOTH, expand=1, pady=5)
         calibration_button = tk.Button(master=main_label_frame, text="麦克风校准",font=self.mainpage_button_font,command=lambda: calibration.start_calibration(self))
         calibration_button.pack(fill=tk.BOTH, expand=1, pady=5)
-        data_button = tk.Button(master=main_label_frame, text="朗读数据",font=self.mainpage_button_font)
+        data_button = tk.Button(master=main_label_frame, text="朗读数据",font=self.mainpage_button_font, command=lambda: self.generate_data_gui())
         data_button.pack(fill=tk.BOTH, expand=1, pady=5)
         server_manager_btn = tk.Button(master=main_label_frame,text="服务器管理", font=self.mainpage_button_font, command=lambda:server_manager.start_manager(self))
         server_manager_btn.pack(fill=tk.BOTH, expand=1,pady=1)
@@ -864,3 +864,25 @@ def reading_back(self):
         messagebox.showinfo(title="无法退出！", message="当前朗读正在进行中，请勿退出朗读界面\n否则可能导致界面更新错误!")
     else:
         self.welcome_page(destroy_window=[self.reading_frame, "reading"])
+
+def generate_data_gui(self):
+    if self.if_data_form_show == True:
+        return
+    self.if_data_form_show = True
+    self.data_frame = tk.Frame(master=self.main_window)
+    self.main_paned_window.add(self.data_frame)
+    if self.if_main_window_show == True:
+        self.content_frame.destroy()
+        self.if_main_window_show = False
+    #notebooks
+    notebook = ttk.Notebook(master=self.data_frame)
+    general_frame = tk.Frame(notebook)
+    day_frame = tk.Frame(notebook)
+    audio_frame = tk.Frame(notebook)
+    notebook.add(general_frame, text="综合")
+    notebook.add(day_frame, text="每日数据")
+    notebook.add(audio_frame, text="音频分析")
+    notebook.pack(fill="both", expand=1)
+    
+    ##genral_frame
+    general_markdown = HTMLLabel()
