@@ -13,6 +13,7 @@ import threading
 import time
 import csv
 import wave
+import shutil
 from . import tts
 
 def bind_reading_api(instance):
@@ -385,10 +386,18 @@ def data_thread(ipc_queue, ui_queue, instance):
                                            "total": int(instance.read_today_data['total']), 
                                            "max_sound": float(instance.read_today_data['max_sound']), 
                                            "efficiency": float(instance.read_today_data['efficiency'])}
+                log(msg="正在合并缓存...", self=instance)
                 with open(f"./data/{current_account}/{'-'.join(get_date.split('-')[0:2])}/{get_date}.json", "w", encoding="utf-8") as f:
                     json.dump(write_data, f)
+                time.sleep(2)
                 list_chunks = os.listdir("./audio_chunks")
                 merge_wav(list_chunks, f"./details/{current_account}/{get_date}/recording.wav")
+                try:
+                    shutil.rmtree("./audio_chunks")
+                    print(2)
+                    log(self=instance, msg="正在清除缓存...")
+                except FileNotFoundError:
+                    log(self=instance, msg="未找到缓存文件夹")
                 break
 
         except Exception as e:
@@ -403,22 +412,41 @@ def read_wav(file_path):
     return params, frames
 
 def merge_wav(wav_list, output_file):
+    print("run")
     merged_params = None
     merged_frames = b''
-
+    print(wav_list)
     for i in range(len(wav_list)):
         wav_list[i] = "./audio_chunks/" + wav_list[i]
+    print(wav_list)
+    # 2. 读取并合并所有wav文件
     for file in wav_list:
         params, frames = read_wav(file)
         if merged_params is None:
             merged_params = params
         merged_frames += frames
+    
+    if not os.path.exists(output_file):
+        print(1)
+        merged_wav = wave.open(output_file, 'wb')
+        merged_wav.setparams(merged_params)
+        merged_wav.writeframes(merged_frames)
+        merged_wav.close()
+    else:
+        # 文件存在，需要合并现有内容和新的内容
+        # 读取现有的output_file内容
+        params_existing, frames_existing = read_wav(output_file)
 
-    merged_wav = wave.open(output_file, 'wb')
-    merged_wav.setparams(merged_params)
-    merged_wav.writeframes(merged_frames)
-    merged_wav.close()
-
+        # 合并帧数据：现有文件内容 + 新合并的内容
+        combined_frames = frames_existing + merged_frames
+        
+        # 写入合并后的数据到output_file
+        merged_wav = wave.open(output_file, 'wb')
+        merged_wav.setparams(params_existing)  # 使用现有文件的参数
+        merged_wav.writeframes(combined_frames)  # 写入合并后的帧
+        merged_wav.close()
+        print("ok")
+        
 def ui_thread(ui_queue, state_label, information_label_list):
     while True:
         try:
