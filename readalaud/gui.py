@@ -7,7 +7,8 @@ import pyttsx3
 import ttkbootstrap as ttkbs
 from markdown import markdown
 from tkhtmlview import HTMLLabel
-from . import settings,tts,reading,calibration,server_manager
+from . import settings,tts,reading,calibration,server_manager,audio_analasy
+import traceback
 
 def bind_gui(instance):
     """把 GUI 相关的方法绑定到 ReadAlaud 实例上。"""
@@ -881,11 +882,23 @@ def _generate_data_gui(self):
         self.content_frame.destroy()
         self.if_main_window_show = False
 
+    # === 全局控件注册表 ===
+    # 用于存储所有通过此界面生成的 Label 和 Canvas，方便后续通过 key 配置属性
+    self.gui_components = {
+        "labels": {},
+        "canvases": {},
+        "frames": {},
+        "buttons": {}
+    }
+
+    def register_component(category, key, widget):
+        if category in self.gui_components:
+            self.gui_components[category][key] = widget
+        return widget
+
     def bind_mousewheel_to_canvas(activate_widget: tk.Widget, canvas: tk.Canvas):
         """
         让滚轮在鼠标位于 activate_widget/canvas/其子控件上时都能滚动 canvas。
-        解决“只有把鼠标放在滚动条上才响应滚轮”的问题。
-        兼容 Windows/macOS(<MouseWheel>) 和 Linux(<Button-4>/<Button-5>)。
         """
         def _on_mousewheel(event):
             try:
@@ -897,7 +910,6 @@ def _generate_data_gui(self):
                 else:
                     # Windows/macOS
                     delta = event.delta
-                    # macOS delta 通常较小；做一下归一化
                     step = int(-1 * (delta / 120)) if delta else 0
                     if step == 0 and delta:
                         step = -1 if delta > 0 else 1
@@ -907,7 +919,6 @@ def _generate_data_gui(self):
             return "break"
 
         def _bind(_):
-            # 进入区域后，用 bind_all 捕获滚轮（这样鼠标在子控件上也能滚动）
             activate_widget.bind_all("<MouseWheel>", _on_mousewheel)
             activate_widget.bind_all("<Button-4>", _on_mousewheel)
             activate_widget.bind_all("<Button-5>", _on_mousewheel)
@@ -920,234 +931,333 @@ def _generate_data_gui(self):
         activate_widget.bind("<Enter>", _bind)
         activate_widget.bind("<Leave>", _unbind)
 
-    # 创建 Notebook 用于存放不同类型的统计数据
+    # 创建 Notebook
     notebook = ttk.Notebook(master=self.data_frame)
-    general_frame = tk.Frame(notebook)
-    day_frame = tk.Frame(notebook)
-    audio_frame = tk.Frame(notebook)
+    general_frame = register_component("frames", "tab_general", tk.Frame(notebook))
+    day_frame = register_component("frames", "tab_day", tk.Frame(notebook))
+    audio_frame = register_component("frames", "tab_audio", tk.Frame(notebook))
 
     notebook.add(general_frame, text="综合")
     notebook.add(day_frame, text="每日数据")
     notebook.add(audio_frame, text="音频分析")
     notebook.pack(fill="both", expand=True)
 
-    # 综合数据展示
-    # Ensure the parent frame expands to hold the scrollbar logic
+    # ================= 1. 综合数据展示 (General) =================
     general_frame.columnconfigure(0, weight=1)
     general_frame.rowconfigure(0, weight=1)
 
-    # Scrollable Canvas Setup
-    data_canvas = tk.Canvas(general_frame)
+    data_canvas = register_component("canvases", "general_scroll", tk.Canvas(general_frame))
     data_scrollbar = ttk.Scrollbar(general_frame, orient="vertical", command=data_canvas.yview)
     scrollable_data_frame = tk.Frame(data_canvas)
 
-    scrollable_data_frame.bind(
-        "<Configure>",
-        lambda _: data_canvas.configure(scrollregion=data_canvas.bbox("all"))
-    )
-
-    # This ensures the inner frame fills the canvas width
+    scrollable_data_frame.bind("<Configure>", lambda _: data_canvas.configure(scrollregion=data_canvas.bbox("all")))
     canvas_frame_window = data_canvas.create_window((0, 0), window=scrollable_data_frame, anchor="nw")
-    data_canvas.bind(
-        "<Configure>",
-        lambda e: data_canvas.itemconfig(canvas_frame_window, width=e.width)
-    )
-
+    data_canvas.bind("<Configure>", lambda e: data_canvas.itemconfig(canvas_frame_window, width=e.width))
     data_canvas.configure(yscrollcommand=data_scrollbar.set)
+    
     data_scrollbar.pack(side="right", fill="y")
     data_canvas.pack(side="left", fill="both", expand=True)
 
-    # 关键修复：把滚轮绑定到“内容区域/画布/外层 frame”，鼠标在任意位置都能滚
     bind_mousewheel_to_canvas(general_frame, data_canvas)
     bind_mousewheel_to_canvas(data_canvas, data_canvas)
     bind_mousewheel_to_canvas(scrollable_data_frame, data_canvas)
 
-    # 1. LabelFrame for Basic Data
-    basic_data_lf = tk.LabelFrame(scrollable_data_frame, text="数据概览", font=self.mainpage_button_font, padx=10, pady=10)
+    # LabelFrame: 数据概览
+    basic_data_lf = register_component("frames", "general_basic_lf", 
+                                     tk.LabelFrame(scrollable_data_frame, text="数据概览", font=self.mainpage_button_font, padx=10, pady=10))
     basic_data_lf.pack(fill="x", padx=10, pady=10)
 
-    # Configure grid weights for equal spacing
     for i in range(5):
         basic_data_lf.columnconfigure(i, weight=1)
 
-    # First Row: Averages and Counts
-    headings_row1 = ["朗读总时长", "连续打卡天数", "平均朗读时长", "平均效率", "平均音量"]
-    self.data_labels = {}
+    # Row 1: 标题与数值
+    headings_row1 = ["朗读总时长（秒）", "朗读总天数", "平均朗读时长", "当前连续朗读天数", "历史最长天数"]
+    self.data_labels = {} # 保持旧有的引用结构
 
     for idx, title in enumerate(headings_row1):
-        tk.Label(basic_data_lf, text=title, font=("微软雅黑", 11)).grid(row=0, column=idx, pady=(0, 5))
-        lbl = tk.Label(basic_data_lf, text="--", font=("微软雅黑", 13, "bold"), fg="#17a2b8")
-        lbl.grid(row=1, column=idx, pady=(0, 5))
-        self.data_labels[title] = lbl
+        # 注册标题Label
+        lbl_title = register_component("labels", f"general_head_{idx}", 
+                                     tk.Label(basic_data_lf, text=title, font=("微软雅黑", 11)))
+        lbl_title.grid(row=0, column=idx, pady=(0, 5))
+        
+        # 注册数值Label
+        lbl_val = register_component("labels", f"general_val_{idx}",
+                                   tk.Label(basic_data_lf, text="--", font=("微软雅黑", 13, "bold"), fg="#17a2b8"))
+        lbl_val.grid(row=1, column=idx, pady=(0, 5))
+        
+        self.data_labels[title] = lbl_val # 业务逻辑引用
 
     # Separator
     ttk.Separator(basic_data_lf, orient='horizontal').grid(row=2, column=0, columnspan=5, sticky="ew", pady=15)
 
-    # Second Row: Records (Max values with dates)
-    tk.Label(basic_data_lf, text="最高效率 (日期)", font=("微软雅黑", 11)).grid(row=3, column=1, pady=(0, 5))
-    self.data_labels["最高效率"] = tk.Label(basic_data_lf, text="-- (----/--/--)", font=("微软雅黑", 13, "bold"), fg="#28a745")
-    self.data_labels["最高效率"].grid(row=4, column=1, pady=(0, 5))
+    # Row 2: 记录
+    l_eff_t = register_component("labels", "general_rec_eff_title", tk.Label(basic_data_lf, text="最高效率 (日期)", font=("微软雅黑", 11)))
+    l_eff_t.grid(row=3, column=1, pady=(0, 5))
+    
+    lbl_eff = register_component("labels", "general_rec_eff_val", 
+                               tk.Label(basic_data_lf, text="-- (----/--/--)", font=("微软雅黑", 13, "bold"), fg="#28a745"))
+    lbl_eff.grid(row=4, column=1, pady=(0, 5))
+    self.data_labels["最高效率"] = lbl_eff
 
-    tk.Label(basic_data_lf, text="最长时长 (日期)", font=("微软雅黑", 11)).grid(row=3, column=3, pady=(0, 5))
-    self.data_labels["最长时长"] = tk.Label(basic_data_lf, text="-- (----/--/--)", font=("微软雅黑", 13, "bold"), fg="#dc3545")
-    self.data_labels["最长时长"].grid(row=4, column=3, pady=(0, 5))
+    l_dur_t = register_component("labels", "general_rec_dur_title", tk.Label(basic_data_lf, text="最长时长 (日期)", font=("微软雅黑", 11)))
+    l_dur_t.grid(row=3, column=3, pady=(0, 5))
 
-    # 2. Graph Area: Visual Charts
-    charts_lf = tk.LabelFrame(scrollable_data_frame, text="数据图表", font=self.mainpage_button_font, padx=10, pady=10)
+    lbl_dur = register_component("labels", "general_rec_dur_val", 
+                               tk.Label(basic_data_lf, text="-- (----/--/--)", font=("微软雅黑", 13, "bold"), fg="#dc3545"))
+    lbl_dur.grid(row=4, column=3, pady=(0, 5))
+    self.data_labels["最长时长"] = lbl_dur
+
+    # LabelFrame: 数据图表
+    charts_lf = register_component("frames", "general_charts_lf", 
+                                 tk.LabelFrame(scrollable_data_frame, text="数据图表", font=self.mainpage_button_font, padx=10, pady=10))
     charts_lf.pack(fill="x", padx=10, pady=10)
 
-    # 2.1 Check-in Heatmap
-    tk.Label(charts_lf, text="打卡热力图", font=("微软雅黑", 12)).pack(anchor="w", pady=(5, 5))
+    # 热力图
+    register_component("labels", "general_chart_heat_title", tk.Label(charts_lf, text="打卡热力图", font=("微软雅黑", 12))).pack(anchor="w", pady=(5, 5))
     heatmap_container = tk.Frame(charts_lf, height=200, bg="#2b2b2b")
     heatmap_container.pack(fill="x", expand=True, pady=(0, 15))
     heatmap_container.pack_propagate(False)
-    tk.Label(heatmap_container, text="[打卡热力图区域]", fg="#888888", bg="#2b2b2b").place(relx=0.5, rely=0.5, anchor="center")
+    register_component("labels", "general_chart_heat_ph", tk.Label(heatmap_container, text="[打卡热力图区域]", fg="#888888", bg="#2b2b2b")).place(relx=0.5, rely=0.5, anchor="center")
     self.chart_frame_heatmap = heatmap_container
 
-    # 2.2 Daily Duration Trend
-    tk.Label(charts_lf, text="每日朗读时长变化", font=("微软雅黑", 12)).pack(anchor="w", pady=(0, 5))
+    # 趋势图
+    register_component("labels", "general_chart_trend_title", tk.Label(charts_lf, text="每日朗读时长变化", font=("微软雅黑", 12))).pack(anchor="w", pady=(0, 5))
     duration_container = tk.Frame(charts_lf, height=250, bg="#2b2b2b")
     duration_container.pack(fill="x", expand=True, pady=(0, 5))
     duration_container.pack_propagate(False)
-    tk.Label(duration_container, text="[朗读时长趋势图区域]", fg="#888888", bg="#2b2b2b").place(relx=0.5, rely=0.5, anchor="center")
+    register_component("labels", "general_chart_trend_ph", tk.Label(duration_container, text="[朗读时长趋势图区域]", fg="#888888", bg="#2b2b2b")).place(relx=0.5, rely=0.5, anchor="center")
     self.chart_frame_duration = duration_container
 
-    # 3. Audio Player
-    player_lf = tk.LabelFrame(scrollable_data_frame, text="录音回放", font=self.mainpage_button_font, padx=10, pady=10)
-    player_lf.pack(fill="x", padx=10, pady=20)
 
-    player_controls = tk.Frame(player_lf)
-    player_controls.pack(fill="x")
-
-    self.player_play_btn = tk.Button(player_controls, text="▶", font=self.mainpage_button_font, width=4)
-    self.player_play_btn.pack(side="left", padx=5)
-
-    self.player_pause_btn = tk.Button(player_controls, text="⏸", font=self.mainpage_button_font, width=4)
-    self.player_pause_btn.pack(side="left", padx=5)
-
-    self.player_current_time = tk.Label(player_controls, text="00:00", font=("Consolas", 10))
-    self.player_current_time.pack(side="left", padx=5)
-
-    self.player_progress = ttk.Scale(player_controls, from_=0, to=100, orient="horizontal")
-    self.player_progress.pack(side="left", fill="x", expand=True, padx=10)
-
-    self.player_total_time = tk.Label(player_controls, text="00:00", font=("Consolas", 10))
-    self.player_total_time.pack(side="left", padx=5)
-
-    # --- 每日数据主容器 ---
+    # ================= 2. 每日数据 (Day) =================
     self.day_list_container = tk.Frame(day_frame)
     self.day_list_container.pack(fill="both", expand=True)
 
-    # 1. 多列列表选择框 (Treeview)
+    # Treeview
     day_columns = ("date", "duration", "pause", "progress")
     self.day_tree = ttk.Treeview(self.day_list_container, columns=day_columns, show="headings", height=15)
-    self.day_tree.heading("date", text="日期")
-    self.day_tree.heading("duration", text="总朗读时间")
-    self.day_tree.heading("pause", text="停顿时间")
-    self.day_tree.heading("progress", text="任务完成度")
-
+    for col, txt in zip(day_columns, ["日期", "总朗读时间", "停顿时间", "任务完成度"]):
+        self.day_tree.heading(col, text=txt)
+    
     day_scroll = ttk.Scrollbar(self.day_list_container, orient="vertical", command=self.day_tree.yview)
     self.day_tree.configure(yscrollcommand=day_scroll.set)
     day_scroll.pack(side="right", fill="y")
     self.day_tree.pack(side="top", fill="both", expand=True, padx=5, pady=5)
 
-    # 2. 选中项比较信息栏
-    self.day_compare_label = tk.Label(
-        self.day_list_container,
-        text="请选择一项以查看对比分析",
-        font=("微软雅黑", 11),
-        fg="#6c757d",
-        pady=10
-    )
+    self.day_compare_label = register_component("labels", "day_compare_hint", 
+        tk.Label(self.day_list_container, text="请选择一项以查看对比分析", font=("微软雅黑", 11), fg="#6c757d", pady=10))
     self.day_compare_label.pack(side="top", fill="x")
 
-    # --- 详细数据容器 (隐藏) ---
+    # Day Detail Container (Hidden initially)
     self.day_detail_container = tk.Frame(day_frame)
-
-    # 详细数据的滚动区域
-    detail_canvas = tk.Canvas(self.day_detail_container)
+    
+    detail_canvas = register_component("canvases", "day_detail_scroll", tk.Canvas(self.day_detail_container))
     detail_vbar = ttk.Scrollbar(self.day_detail_container, orient="vertical", command=detail_canvas.yview)
     self.detail_scroll_frame = tk.Frame(detail_canvas)
 
     self.detail_scroll_frame.bind("<Configure>", lambda _: detail_canvas.configure(scrollregion=detail_canvas.bbox("all")))
     detail_canvas_window = detail_canvas.create_window((0, 0), window=self.detail_scroll_frame, anchor="nw")
     detail_canvas.bind("<Configure>", lambda e: detail_canvas.itemconfig(detail_canvas_window, width=e.width))
-
     detail_canvas.configure(yscrollcommand=detail_vbar.set)
+    
     detail_vbar.pack(side="right", fill="y")
     detail_canvas.pack(side="left", fill="both", expand=True)
 
-    # 关键修复：详情页滚动同样绑定到内容区域
     bind_mousewheel_to_canvas(self.day_detail_container, detail_canvas)
     bind_mousewheel_to_canvas(detail_canvas, detail_canvas)
     bind_mousewheel_to_canvas(self.detail_scroll_frame, detail_canvas)
 
-    # 返回列表按钮
-    back_to_list_btn = tk.Button(
-        self.detail_scroll_frame,
-        text="← 返回列表",
-        font=self.mainpage_button_font,
-        command=lambda: [
-            self.day_detail_container.pack_forget(),
-            self.day_list_container.pack(fill="both", expand=True)
-        ]
-    )
+    # Back Button
+    back_to_list_btn = register_component("buttons", "day_back", tk.Button(
+        self.detail_scroll_frame, text="← 返回列表", font=self.mainpage_button_font,
+        command=lambda: [self.day_detail_container.pack_forget(), self.day_list_container.pack(fill="both", expand=True)]
+    ))
     back_to_list_btn.pack(anchor="w", padx=10, pady=5)
 
-    # 详细数据展示区
-    detail_stats_lf = tk.LabelFrame(self.detail_scroll_frame, text="数据详情", font=self.mainpage_button_font, padx=10, pady=10)
+    detail_stats_lf = register_component("frames", "day_detail_lf", 
+                                       tk.LabelFrame(self.detail_scroll_frame, text="数据详情", font=self.mainpage_button_font, padx=10, pady=10))
     detail_stats_lf.pack(fill="x", padx=10, pady=5)
 
     self.detail_val_labels = {}
     stats_titles = ["总时长", "停顿总时长", "效率", "完成度", "最大音量", "平均音量", "同比昨日"]
     for i, title in enumerate(stats_titles):
-        row = i // 2
-        col = i % 2
-        tk.Label(detail_stats_lf, text=f"{title}:", font=("微软雅黑", 11)).grid(row=row, column=col * 2, sticky="w", pady=2)
-        lbl = tk.Label(detail_stats_lf, text="--", font=("微软雅黑", 11, "bold"), fg="#17a2b8")
+        row, col = i // 2, i % 2
+        register_component("labels", f"day_det_t_{title}", tk.Label(detail_stats_lf, text=f"{title}:", font=("微软雅黑", 11))).grid(row=row, column=col * 2, sticky="w", pady=2)
+        lbl = register_component("labels", f"day_det_v_{title}", tk.Label(detail_stats_lf, text="--", font=("微软雅黑", 11, "bold"), fg="#17a2b8"))
         lbl.grid(row=row, column=col * 2 + 1, sticky="w", padx=(5, 20), pady=2)
         self.detail_val_labels[title] = lbl
 
-    # 音量变化统计图
-    tk.Label(self.detail_scroll_frame, text="音量变化趋势", font=("微软雅黑", 12)).pack(anchor="w", padx=15, pady=(10, 5))
-    self.volume_chart_canvas = tk.Canvas(self.detail_scroll_frame, height=200, bg="#2b2b2b", highlightthickness=0)
+    register_component("labels", "day_vol_chart_title", tk.Label(self.detail_scroll_frame, text="音量变化趋势", font=("微软雅黑", 12))).pack(anchor="w", padx=15, pady=(10, 5))
+    self.volume_chart_canvas = register_component("canvases", "day_vol_chart", 
+                                                tk.Canvas(self.detail_scroll_frame, height=200, bg="#2b2b2b", highlightthickness=0))
     self.volume_chart_canvas.pack(fill="x", padx=15, pady=5)
 
-    # 将原有音频播放器逻辑移入此详情页（重新包装）
-    detail_player_lf = tk.LabelFrame(self.detail_scroll_frame, text="当日录音回放", font=self.mainpage_button_font, padx=10, pady=10)
+    detail_player_lf = register_component("frames", "day_player_lf", 
+                                        tk.LabelFrame(self.detail_scroll_frame, text="当日录音回放", font=self.mainpage_button_font, padx=10, pady=10))
     detail_player_lf.pack(fill="x", padx=10, pady=15)
-
     player_controls_detail = tk.Frame(detail_player_lf)
     player_controls_detail.pack(fill="x")
     tk.Button(player_controls_detail, text="▶", width=4).pack(side="left", padx=5)
     tk.Button(player_controls_detail, text="⏸", width=4).pack(side="left", padx=5)
     ttk.Scale(player_controls_detail, from_=0, to=100, orient="horizontal").pack(side="left", fill="x", expand=True, padx=10)
 
-    # 绑定事件
-    def on_day_select(_):
-        # 逻辑：更新 self.day_compare_label
-        pass
-
+    # Bindings
+    def on_day_select(_): pass
     def on_day_double_click(_):
         self.day_list_container.pack_forget()
         self.day_detail_container.pack(fill="both", expand=True)
-        # 逻辑：渲染 self.volume_chart_canvas 和详细 Label
-
     self.day_tree.bind("<<TreeviewSelect>>", on_day_select)
     self.day_tree.bind("<Double-1>", on_day_double_click)
 
-    # 音频分析展示 - 使用 HTMLLabel
-    self.audio_markdown = HTMLLabel(
-        master=audio_frame,
-        html="<h1>音频特征分析</h1><p>这里将展示声音阈值、停顿分析及音效反馈等深度指标。</p>"
-    )
-    self.audio_markdown.pack(fill="both", expand=True)
 
-    # 返回按钮
-    back_button = tk.Button(
-        master=self.data_frame,
-        text="返回",
-        font=self.mainpage_button_font,
+    # ================= 3. 音频分析 (Audio) =================
+    audio_canvas = register_component("canvases", "audio_scroll", tk.Canvas(audio_frame, bg="white", highlightthickness=0))
+    audio_scrollbar = ttk.Scrollbar(audio_frame, orient="vertical", command=audio_canvas.yview)
+    audio_scroll_content = tk.Frame(audio_canvas, bg="white")
+    
+    audio_canvas_window = audio_canvas.create_window((0, 0), window=audio_scroll_content, anchor="nw")
+    audio_canvas.configure(yscrollcommand=audio_scrollbar.set)
+    audio_canvas.pack(side="left", fill="both", expand=True)
+    audio_scrollbar.pack(side="right", fill="y")
+
+    audio_scroll_content.bind("<Configure>", lambda _: audio_canvas.configure(scrollregion=audio_canvas.bbox("all")))
+    audio_canvas.bind("<Configure>", lambda e: audio_canvas.itemconfig(audio_canvas_window, width=e.width))
+    bind_mousewheel_to_canvas(audio_frame, audio_canvas)
+    bind_mousewheel_to_canvas(audio_canvas, audio_canvas)
+    bind_mousewheel_to_canvas(audio_scroll_content, audio_canvas)
+
+    section_title_font = ("微软雅黑", 12, "bold")
+    subsection_font = ("微软雅黑", 10, "bold")
+
+    def add_section(parent, title, key=""):
+        frame = tk.LabelFrame(parent, text=title, font=section_title_font, bg="white", fg="#333", padx=10, pady=10)
+        frame.pack(fill="x", padx=10, pady=10)
+        if key: register_component("frames", key, frame)
+        return frame
+
+    def add_canvas(parent, height, key_name, bg="#202020"):
+        canvas = tk.Canvas(parent, height=height, bg=bg, highlightthickness=0)
+        canvas.pack(fill="x", pady=6)
+        register_component("canvases", key_name, canvas)
+        return canvas
+
+    # (1) VAD
+    vad_section = add_section(audio_scroll_content, "语音活动检测 (Voice Activity Detection)", "audio_sct_vad")
+    register_component("labels", "audio_vad_hint", tk.Label(vad_section, text="静默时间点 (Time-Line)", font=subsection_font, bg="white")).pack(anchor="w", pady=(0, 6))
+    
+    vad_cols = ("start", "end", "duration")
+    self.vad_silence_tree = ttk.Treeview(vad_section, columns=vad_cols, show="headings", height=6)
+    for col, txt, w in zip(vad_cols, ("开始时间", "结束时间", "持续时长"), (110, 110, 100)):
+        self.vad_silence_tree.heading(col, text=txt)
+        self.vad_silence_tree.column(col, width=w, anchor="center")
+    vad_scroll = ttk.Scrollbar(vad_section, orient="vertical", command=self.vad_silence_tree.yview)
+    self.vad_silence_tree.configure(yscrollcommand=vad_scroll.set)
+    self.vad_silence_tree.pack(side="left", fill="both", expand=True)
+    vad_scroll.pack(side="right", fill="y")
+
+    # (2) Quality Assessment
+    quality_section = add_section(audio_scroll_content, "朗读质量评估", "audio_sct_qual")
+
+    register_component("labels", "audio_rms_t", tk.Label(quality_section, text="短时能量 (RMS) ", font=subsection_font, bg="white")).pack(anchor="w")
+    self.rms_canvas = add_canvas(quality_section, 120, "audio_rms")
+
+    register_component("labels", "audio_zcr_t", tk.Label(quality_section, text="过零率与分贝叠加图", font=subsection_font, bg="white")).pack(anchor="w", pady=(12, 0))
+    self.zcr_db_canvas = add_canvas(quality_section, 140, "audio_zcr")
+    
+    register_component("labels", "audio_zcr_list_t", tk.Label(quality_section, text="高过零率时间点", font=subsection_font, bg="white")).pack(anchor="w", pady=(6, 0))
+    zcr_cols = ("time", "zcr", "db")
+    self.high_zcr_tree = ttk.Treeview(quality_section, columns=zcr_cols, show="headings", height=4)
+    for col, txt, w in zip(zcr_cols, ("时间", "ZCR", "dB"), (120, 80, 80)):
+        self.high_zcr_tree.heading(col, text=txt)
+        self.high_zcr_tree.column(col, width=w, anchor="center")
+    self.high_zcr_tree.pack(fill="x", pady=(2, 8))
+
+    register_component("labels", "audio_crest_t", tk.Label(quality_section, text="峰值因子 (Crest Factor) 谱", font=subsection_font, bg="white")).pack(anchor="w")
+    self.crest_canvas = add_canvas(quality_section, 120, "audio_crest")
+
+    register_component("labels", "audio_ltas_t", tk.Label(quality_section, text="长时平均能量 (LTAS)", font=subsection_font, bg="white")).pack(anchor="w", pady=(12, 4))
+    ltas_cols = ("band", "energy")
+    self.long_term_energy_tree = ttk.Treeview(quality_section, columns=ltas_cols, show="headings", height=5)
+    for col, txt, w in zip(ltas_cols, ("频段", "能量值"), (140, 160)):
+        self.long_term_energy_tree.heading(col, text=txt)
+        self.long_term_energy_tree.column(col, width=w, anchor="center")
+    self.long_term_energy_tree.pack(fill="x", pady=(0, 8))
+
+    register_component("labels", "audio_spec_t", tk.Label(quality_section, text="语谱图 (Spectrogram)", font=subsection_font, bg="white")).pack(anchor="w")
+    self.spectrogram_canvas = add_canvas(quality_section, 160, "audio_spectrogram")
+
+    register_component("labels", "audio_env_t", tk.Label(quality_section, text="音量包络 (Energy Envelope)", font=subsection_font, bg="white")).pack(anchor="w", pady=(12, 0))
+    self.envelope_canvas = add_canvas(quality_section, 100, "audio_envelope")
+
+    register_component("labels", "audio_entr_t", tk.Label(quality_section, text="频谱熵 (Spectral Entropy)", font=subsection_font, bg="white")).pack(anchor="w", pady=(12, 0))
+    self.spectral_entropy_canvas = add_canvas(quality_section, 120, "audio_entropy")
+
+    register_component("labels", "audio_pitch_t", tk.Label(quality_section, text="音高曲线 (Pitch Contour)", font=subsection_font, bg="white")).pack(anchor="w", pady=(12, 0))
+    self.pitch_canvas = add_canvas(quality_section, 120, "audio_pitch")
+
+    audio_scroll_content.update_idletasks()
+    audio_canvas.configure(scrollregion=audio_canvas.bbox("all"))
+
+    # Return Button
+    back_button = register_component("buttons", "global_return", tk.Button(
+        master=self.data_frame, text="返回", font=self.mainpage_button_font,
         command=lambda: self.welcome_page(destroy_window=[self.data_frame, "data_form"])
-    )
+    ))
     back_button.pack(fill="x", pady=5)
+    refresh_general_dashboard(self)
+
+def refresh_general_dashboard(self):
+    try:
+        # Fetch fresh analysis data
+        dashboard_data = audio_analasy.refresh_dashboard_data(self)
+        
+        # --- Update Basic Stats in General Tab ---
+        # "朗读总时长（秒）", "朗读总天数", "平均朗读时长", "当前连续朗读天数", "历史最长天数"
+        # The titles are keys in self.data_labels, created in _generate_data_gui
+        print(type(dashboard_data))
+        if isinstance(dashboard_data, dict):
+            self.data_labels["朗读总天数"].config(text=str(dashboard_data.get('total_days', '--')))
+            self.data_labels["朗读总时长（秒）"].config(text=f"{dashboard_data.get('total_duration', 0):.2f}")
+            self.data_labels["平均朗读时长"].config(text=f"{dashboard_data.get('avg_duration', 0):.2f}")
+            self.data_labels["当前连续朗读天数"].config(text=str(dashboard_data.get('current_streak', '--')))
+            self.data_labels["历史最长天数"].config(text=str(dashboard_data.get('max_streak', '--')))
+        else:
+            print("Error: dashboard_data is not a dictionary.")
+
+        # Update Records
+        eff_date = dashboard_data.get('max_efficiency_date', '----/--/--')
+        eff_val = dashboard_data.get('max_efficiency_val', 0.0)
+        self.data_labels["最高效率"].config(text=f"{eff_val:.2f} ({eff_date})")
+
+        dur_date = dashboard_data.get('max_duration_date', '----/--/--')
+        dur_val = dashboard_data.get('max_duration_val', 0.0)
+        self.data_labels["最长时长"].config(text=f"{dur_val:.2f} ({dur_date})")
+
+        # --- Update Charts (Heatmap & Trend) ---
+        # Note: Actual plotting usually requires matplotlib integration into Tkinter
+        # Here we just assume audio_analasy provides a helper to draw directly onto the container frames 
+        # or we update placeholder text if no plotting lib is ready.
+        if 'heatmap_figure' in dashboard_data:
+            # Clear old content in chart frames
+            for widget in self.chart_frame_heatmap.winfo_children():
+                widget.destroy()
+            dashboard_data['heatmap_figure'].pack(fill="both", expand=True) # Assuming it returns a tk widget
+            
+        if 'trend_figure' in dashboard_data:
+            for widget in self.chart_frame_duration.winfo_children():
+                widget.destroy()
+            dashboard_data['trend_figure'].pack(fill="both", expand=True)
+
+        # --- Update Day List Treeview ---
+        # Clear existing items
+        for item in self.day_tree.get_children():
+            self.day_tree.delete(item)
+            
+        # Insert new items
+        for record in dashboard_data.get('daily_records', []):
+            # record: (date, duration, pause, progress)
+            self.day_tree.insert("", tk.END, values=record)
+
+    except Exception as e:
+        print(f"Error refreshing dashboard: {e}")
+        traceback.print_exc()
