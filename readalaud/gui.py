@@ -1024,9 +1024,8 @@ def _generate_data_gui(self):
 
     # 趋势图
     register_component("labels", "general_chart_trend_title", tk.Label(charts_lf, text="每日朗读时长变化", font=("微软雅黑", 12))).pack(anchor="w", pady=(0, 5))
-    duration_container = tk.Frame(charts_lf, height=250, bg="#2b2b2b")
-    duration_container.pack(fill="x", expand=True, pady=(0, 5))
-    duration_container.pack_propagate(False)
+    duration_container = tk.Frame(charts_lf, bg="#2b2b2b")
+    duration_container.pack(fill="x", expand=True)
     register_component("labels", "general_chart_trend_ph", tk.Label(duration_container, text="[朗读时长趋势图区域]", fg="#888888", bg="#2b2b2b")).place(relx=0.5, rely=0.5, anchor="center")
     self.chart_frame_duration = duration_container
 
