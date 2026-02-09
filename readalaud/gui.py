@@ -9,6 +9,8 @@ from markdown import markdown
 from tkhtmlview import HTMLLabel
 from . import settings,tts,reading,calibration,server_manager,audio_analasy
 import traceback
+from PIL import Image, ImageTk
+
 
 def bind_gui(instance):
     """把 GUI 相关的方法绑定到 ReadAlaud 实例上。"""
@@ -971,7 +973,7 @@ def _generate_data_gui(self):
         basic_data_lf.columnconfigure(i, weight=1)
 
     # Row 1: 标题与数值
-    headings_row1 = ["朗读总时长（秒）", "朗读总天数", "平均朗读时长", "当前连续朗读天数", "历史最长天数"]
+    headings_row1 = ["朗读总时长（秒）", "朗读总天数", "平均朗读时长", "当前连续朗读天数", "历史最长天数", "平均效率"]
     self.data_labels = {} # 保持旧有的引用结构
 
     for idx, title in enumerate(headings_row1):
@@ -1206,57 +1208,83 @@ def _generate_data_gui(self):
     back_button.pack(fill="x", pady=5)
     refresh_general_dashboard(self)
 
+
+import os 
+
+def _load_and_display_image(path, parent_frame, width_hint=None):
+    """Auxiliary to load image into a Frame"""
+    for widget in parent_frame.winfo_children():
+        widget.destroy()
+
+    if not path or not os.path.exists(path):
+        tk.Label(parent_frame, text="暂无图表数据", bg="#2b2b2b", fg="gray").pack(pady=20)
+        return
+
+    try:
+        # Open with PIL
+        pil_img = Image.open(path)
+        
+        # Simple resize based on frame width if needed, but Frames are dynamic.
+        # For now, we display as is or resize slightly if too big.
+        # Ideally, bind <Configure> to resize, but for static cache loading simpler is better.
+        
+        # Convert to PhotoImage
+        tk_img = ImageTk.PhotoImage(pil_img)
+        
+        # Keep reference to avoid GC
+        label = tk.Label(parent_frame, image=tk_img, bg="#2b2b2b")
+        label.image = tk_img 
+        label.pack(fill="both", expand=True)
+        
+    except Exception as e:
+        print(f"Error loading image {path}: {e}")
+        tk.Label(parent_frame, text=f"加载失败: {e}", bg="#2b2b2b", fg="red").pack()
+
 def refresh_general_dashboard(self):
     try:
         # Fetch fresh analysis data
         dashboard_data = audio_analasy.refresh_dashboard_data(self)
         
         # --- Update Basic Stats in General Tab ---
-        # "朗读总时长（秒）", "朗读总天数", "平均朗读时长", "当前连续朗读天数", "历史最长天数"
-        # The titles are keys in self.data_labels, created in _generate_data_gui
-        print(type(dashboard_data))
         if isinstance(dashboard_data, dict):
             self.data_labels["朗读总天数"].config(text=str(dashboard_data.get('total_days', '--')))
-            self.data_labels["朗读总时长（秒）"].config(text=f"{dashboard_data.get('total_duration', 0):.2f}")
-            self.data_labels["平均朗读时长"].config(text=f"{dashboard_data.get('avg_duration', 0):.2f}")
+            self.data_labels["朗读总时长（秒）"].config(text=f"{dashboard_data.get('total', 0):.2f}")
+            self.data_labels["平均朗读时长"].config(text=f"{dashboard_data.get('average_daily', 0):.2f}")
             self.data_labels["当前连续朗读天数"].config(text=str(dashboard_data.get('current_streak', '--')))
             self.data_labels["历史最长天数"].config(text=str(dashboard_data.get('max_streak', '--')))
+            self.data_labels["平均效率"].config(text=str(dashboard_data.get('average_efficiency', '--')))
         else:
             print("Error: dashboard_data is not a dictionary.")
 
         # Update Records
         eff_date = dashboard_data.get('max_efficiency_date', '----/--/--')
         eff_val = dashboard_data.get('max_efficiency_val', 0.0)
-        self.data_labels["最高效率"].config(text=f"{eff_val:.2f} ({eff_date})")
+        self.data_labels["最高效率"].config(text=f"{eff_val:.0%} ({eff_date})")
 
         dur_date = dashboard_data.get('max_duration_date', '----/--/--')
         dur_val = dashboard_data.get('max_duration_val', 0.0)
-        self.data_labels["最长时长"].config(text=f"{dur_val:.2f} ({dur_date})")
+        self.data_labels["最长时长"].config(text=f"{dur_val:.0f}s ({dur_date})")
 
         # --- Update Charts (Heatmap & Trend) ---
-        # Note: Actual plotting usually requires matplotlib integration into Tkinter
-        # Here we just assume audio_analasy provides a helper to draw directly onto the container frames 
-        # or we update placeholder text if no plotting lib is ready.
-        if 'heatmap_figure' in dashboard_data:
-            # Clear old content in chart frames
-            for widget in self.chart_frame_heatmap.winfo_children():
-                widget.destroy()
-            dashboard_data['heatmap_figure'].pack(fill="both", expand=True) # Assuming it returns a tk widget
-            
-        if 'trend_figure' in dashboard_data:
-            for widget in self.chart_frame_duration.winfo_children():
-                widget.destroy()
-            dashboard_data['trend_figure'].pack(fill="both", expand=True)
+        heatmap_path = dashboard_data.get('heatmap_path')
+        trend_path = dashboard_data.get('trend_path')
+        
+        if hasattr(self, 'chart_frame_heatmap') and heatmap_path:
+             _load_and_display_image(heatmap_path, self.chart_frame_heatmap)
+             
+        if hasattr(self, 'chart_frame_duration'):
+             _load_and_display_image(trend_path, self.chart_frame_duration)
 
         # --- Update Day List Treeview ---
         # Clear existing items
-        for item in self.day_tree.get_children():
-            self.day_tree.delete(item)
+        if hasattr(self, 'day_tree'):
+            for item in self.day_tree.get_children():
+                self.day_tree.delete(item)
             
-        # Insert new items
-        for record in dashboard_data.get('daily_records', []):
-            # record: (date, duration, pause, progress)
-            self.day_tree.insert("", tk.END, values=record)
+            # Insert new items
+            for record in dashboard_data.get('daily_records', []):
+                # record: (date, duration, pause, efficiency_str)
+                self.day_tree.insert("", tk.END, values=record)
 
     except Exception as e:
         print(f"Error refreshing dashboard: {e}")
