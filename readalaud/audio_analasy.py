@@ -323,3 +323,6 @@ def refresh_dashboard_data(self):
         json.dump(cache_dict, f, indent=4)
 
     return result_data
+
+def fetch_for_daily_data(self, date):
+    pass

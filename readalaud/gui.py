@@ -1045,17 +1045,12 @@ def _generate_data_gui(self):
     day_scroll.pack(side="right", fill="y")
     self.day_tree.pack(side="top", fill="both", expand=True, padx=5, pady=5)
 
-    self.day_compare_label = register_component("labels", "day_compare_hint", 
-        tk.Label(self.day_list_container, text="请选择一项以查看对比分析", font=("微软雅黑", 11), fg="#6c757d", pady=10))
-    self.day_compare_label.pack(side="top", fill="x")
-
     # Day Detail Container (Hidden initially)
     self.day_detail_container = tk.Frame(day_frame)
     
     detail_canvas = register_component("canvases", "day_detail_scroll", tk.Canvas(self.day_detail_container))
     detail_vbar = ttk.Scrollbar(self.day_detail_container, orient="vertical", command=detail_canvas.yview)
     self.detail_scroll_frame = tk.Frame(detail_canvas)
-
     self.detail_scroll_frame.bind("<Configure>", lambda _: detail_canvas.configure(scrollregion=detail_canvas.bbox("all")))
     detail_canvas_window = detail_canvas.create_window((0, 0), window=self.detail_scroll_frame, anchor="nw")
     detail_canvas.bind("<Configure>", lambda e: detail_canvas.itemconfig(detail_canvas_window, width=e.width))
@@ -1102,12 +1097,14 @@ def _generate_data_gui(self):
     tk.Button(player_controls_detail, text="⏸", width=4).pack(side="left", padx=5)
     ttk.Scale(player_controls_detail, from_=0, to=100, orient="horizontal").pack(side="left", fill="x", expand=True, padx=10)
 
+
     # Bindings
-    def on_day_select(_): pass
     def on_day_double_click(_):
         self.day_list_container.pack_forget()
         self.day_detail_container.pack(fill="both", expand=True)
-    self.day_tree.bind("<<TreeviewSelect>>", on_day_select)
+        get_choice = self.day_tree.selection()[0]
+        select_value = self.day_tree.item(get_choice)
+        print(select_value)
     self.day_tree.bind("<Double-1>", on_day_double_click)
 
 
