@@ -282,17 +282,30 @@ def _build_day_tab(self, day_frame, register_component):
     _bind_mousewheel_to_canvas(self.detail_scroll_frame, detail_canvas)
 
     # Back Button
+    button_frame = tk.Frame(self.detail_scroll_frame)
+    button_frame.pack(anchor="w", padx=10, pady=5, fill="x")
+    
     back_to_list_btn = register_component(
         "buttons", "day_back",
         tk.Button(
-            self.detail_scroll_frame, text="← 返回列表", font=self.mainpage_button_font,
+            button_frame, text="← 返回列表", font=self.mainpage_button_font,
             command=lambda: [
                 self.day_detail_container.pack_forget(),
                 self.day_list_container.pack(fill="both", expand=True),
             ],
         ),
     )
-    back_to_list_btn.pack(anchor="w", padx=10, pady=5)
+    back_to_list_btn.pack(side="left")
+    
+    # Refresh Button
+    refresh_btn = register_component(
+        "buttons", "day_refresh",
+        tk.Button(
+            button_frame, text="⟳ 刷新数据", font=self.mainpage_button_font,
+            command=lambda: load_detail_data(getattr(self, 'current_view_date', None), force=True) 
+        )
+    )
+    refresh_btn.pack(side="left", padx=10)
 
     detail_stats_lf = register_component(
         "frames", "day_detail_lf",
@@ -339,12 +352,74 @@ def _build_day_tab(self, day_frame, register_component):
     )
 
     # Bindings
+    def load_detail_data(target_date, force=False):
+        """
+        Helper to fetch and display daily detail
+        """
+        if not target_date:
+            return
+            
+        try:
+             # Progress state
+            for label in self.detail_val_labels.values():
+                label.config(text="加载中...", fg="#888888")
+            self.day_detail_container.update_idletasks()
+            
+            # Fetch
+            detail_data = audio_analasy.fetch_for_daily_data(self, target_date, force_refresh=force)
+            
+            if not detail_data:
+                for label in self.detail_val_labels.values():
+                    label.config(text="无数据", fg="#dc3545")
+                return
+
+            # Update UI
+            self.detail_val_labels["总时长"].config(text=f"{detail_data.get('total_duration', 0)} 秒", fg="#17a2b8")
+            self.detail_val_labels["停顿总时长"].config(text=f"{detail_data.get('pause_duration', 0)} 秒", fg="#ffc107")
+            self.detail_val_labels["效率"].config(text=f"{detail_data.get('efficiency', 0.0):.0%}", fg="#28a745")
+            self.detail_val_labels["完成度"].config(text=detail_data.get('completion', '--'), fg="#6f42c1")
+            self.detail_val_labels["最大音量"].config(text=f"{detail_data.get('max_volume', 0.0):.1f} dB", fg="#dc3545")
+            self.detail_val_labels["平均音量"].config(text=f"{detail_data.get('avg_volume', 0.0):.1f} dB", fg="#fd7e14")
+            self.detail_val_labels["同比昨日"].config(text=detail_data.get('compare_yesterday', '--'), fg="#20c997")
+            
+             # Chart
+            vol_chart_path = detail_data.get('volume_chart_path', '')
+            if vol_chart_path and os.path.exists(vol_chart_path):
+                _load_and_display_image(vol_chart_path, self.volume_chart_canvas)
+            else:
+                self.volume_chart_canvas.delete("all")
+                w, h = self.volume_chart_canvas.winfo_width(), self.volume_chart_canvas.winfo_height()
+                if w > 1:
+                    self.volume_chart_canvas.create_text(w//2, h//2, text="暂无音量数据", fill="#888888", font=("微软雅黑", 10))
+            
+            self.day_detail_container.update_idletasks()
+        except Exception as e:
+            print(f"Error loading daily detail: {e}")
+            traceback.print_exc()
+
     def on_day_double_click(_):
-        self.day_list_container.pack_forget()
-        self.day_detail_container.pack(fill="both", expand=True)
-        get_choice = self.day_tree.selection()[0]
-        select_value = self.day_tree.item(get_choice)
-        print(select_value)
+        """
+        双击每日数据列表项，加载并展示该日详情。
+        """
+        try:
+            selection = self.day_tree.selection()
+            if not selection:
+                return
+            item_values = self.day_tree.item(selection[0], 'values')
+            if not item_values:
+                return
+            selected_date = item_values[0]
+            
+            # Switch View
+            self.day_list_container.pack_forget()
+            self.day_detail_container.pack(fill="both", expand=True)
+            
+            # Save State & Load
+            self.current_view_date = selected_date
+            load_detail_data(selected_date, force=False)
+            
+        except Exception as e:
+            print(f"Error handling double click: {e}")
 
     self.day_tree.bind("<Double-1>", on_day_double_click)
 

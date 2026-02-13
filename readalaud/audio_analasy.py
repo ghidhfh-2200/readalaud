@@ -2,7 +2,7 @@ import os
 import json
 import time
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta, date
 import matplotlib
 import matplotlib.pyplot as plt
 import calmap
@@ -324,5 +324,190 @@ def refresh_dashboard_data(self):
 
     return result_data
 
-def fetch_for_daily_data(self, date):
-    pass
+def _save_volume_chart(data, save_path):
+    try:
+        if not data:
+            return False
+            
+        fig = plt.figure(figsize=(8, 2), dpi=100)
+        ax = fig.add_subplot(111)
+        
+        # Plot volume data
+        ax.plot(data, color='#28a745', linewidth=1, alpha=0.8)
+        ax.fill_between(range(len(data)), data, color='#28a745', alpha=0.1)
+        
+        # Style
+        ax.set_title("音量变化趋势 (dB)", fontproperties="Microsoft YaHei", fontsize=10)
+        ax.set_ylabel("Volume", fontsize=8)
+        ax.set_xticks([]) # Hide time ticks
+        
+        # Remove borders
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.spines['left'].set_visible(False)
+        ax.spines['bottom'].set_visible(False)
+
+        plt.tight_layout()
+        fig.savefig(save_path, bbox_inches='tight', dpi=100)
+        plt.close(fig)
+        return True
+    except Exception as e:
+        print(f"Error saving volume chart: {e}")
+        return False
+
+def fetch_for_daily_data(self, date_input, force_refresh=False):
+    """
+    [Detailed Data] 获取指定日期的详细数据。
+    
+    Args:
+        date_input (str or datetime.date): 查询日期, "YYYY-MM-DD" 或 date对象
+        force_refresh (bool): 是否强制刷新缓存 (Default: False)
+
+    Returns:
+        dict: 包含当日详细数据的字典
+    """
+    account = getattr(self, "current_acount", None)
+    if not account:
+        return {}
+
+    # 1. 解析日期
+    if isinstance(date_input, str):
+        try:
+            target_date = datetime.strptime(date_input, "%Y-%m-%d").date()
+        except ValueError:
+            return {} # Invalid format
+    elif isinstance(date_input, datetime):
+        target_date = date_input.date()
+    else:
+        target_date = date_input
+
+    date_str = target_date.strftime("%Y-%m-%d")
+    month_str = target_date.strftime("%Y-%m")
+    
+    # 2. 定义路径
+    import os
+    json_path = f"./data/{account}/{month_str}/{date_str}.json"
+    details_dir = f"./details/{account}/{date_str}"
+    db_csv_path = os.path.join(details_dir, "DB.csv")
+    vol_chart_path = os.path.join(details_dir, "volume_chart.png")
+    cache_path = os.path.join(details_dir, "daily_cache.json")
+    config_path = f"./data/{account}/settings.json"
+    
+    # --- Cache Check ---
+    if not force_refresh and os.path.exists(cache_path):
+        try:
+            with open(cache_path, 'r') as f:
+                cached = json.load(f)
+                # Check 1: Time threshold (5 mins)
+                # Check 2: If chart is expected, does it exist?
+                is_fresh = (time.time() - cached.get('timestamp', 0) < 300)
+                chart_ok = True
+                if cached.get('volume_chart_path') and not os.path.exists(cached['volume_chart_path']):
+                    chart_ok = False
+                
+                if is_fresh and chart_ok:
+                    print(f"Load cached daily detail for {date_str}")
+                    return cached
+        except (json.JSONDecodeError, OSError, KeyError):
+            pass
+
+    # --- Calculation ---
+    if not os.path.exists(json_path):
+        return {}
+    if not os.path.exists(config_path):
+        return {}
+    
+    # 初始默认数据
+    result = {
+        "date": date_str,
+        "total_duration": 0,
+        "pause_duration": 0,
+        "efficiency": 0.0,
+        "completion": "-",  
+        "max_volume": 0.0,
+        "avg_volume": 0.0,
+        "compare_yesterday": "--",
+        "volume_chart_path": "",
+    }
+
+    try:
+        with open(config_path, "r") as f:
+            read_config = json.load(f)
+            get_goal = read_config.get("goal", 0)
+    except json.JSONDecodeError:
+        print("Error reading config json: fail to decode the JSON")
+        return {}
+    # 3. 读取 JSON 基础数据
+    try:
+        with open(json_path, 'r') as f:
+            data = json.load(f)
+            result["total_duration"] = int(data.get("total", 0))
+            result["pause_duration"] = int(data.get("stop_total", 0))
+            result["efficiency"] = float(data.get("efficiency", 0.0))
+            result["completion"] = f"{(data.get('real_read_time', 0) / get_goal)*100:.1f}%"
+            result["max_volume"] = float(data.get("max_sound", 0.0))
+    except json.JSONDecodeError:
+        print("Error reading daily json: fail to decode the data file")
+        return {}
+    except Exception as e:
+        print(f"Error reading daily json: {e}")
+        return {}
+
+    # 4. 处理音量数据 & 生成图表
+    vol_data = []
+    if os.path.exists(db_csv_path):
+        try:
+            with open(db_csv_path, 'r') as f:
+                content = f.read()
+                content = content.replace('\n', ',')
+                parts = content.split(',')
+                vol_data = [float(x) for x in parts if x.strip()]
+            
+            if vol_data:
+                result["avg_volume"] = sum(vol_data) / len(vol_data)
+                
+                # Check/Generate Chart
+                if not os.path.exists(vol_chart_path) or force_refresh:
+                     _save_volume_chart(vol_data, vol_chart_path)
+                result["volume_chart_path"] = vol_chart_path
+        except Exception as e:
+            print(f"Error processing volume data: {e}")
+
+    # 5. 计算同比昨日
+    try:
+        yst_date = target_date - timedelta(days=1)
+        yst_str = yst_date.strftime("%Y-%m-%d")
+        yst_month = yst_date.strftime("%Y-%m")
+        yst_json_path = f"./data/{account}/{yst_month}/{yst_str}.json"
+        
+        if os.path.exists(yst_json_path):
+            with open(yst_json_path, 'r') as f:
+                yst_data = json.load(f)
+                yst_total = int(yst_data.get("total", 0))
+                
+                if yst_total > 0:
+                    diff = result["total_duration"] - yst_total
+                    percent = (diff / yst_total) * 100
+                    sign = "+" if percent >= 0 else ""
+                    result["compare_yesterday"] = f"{sign}{percent:.1f}%"
+                else:
+                    if result["total_duration"] > 0:
+                         result["compare_yesterday"] = "+∞" 
+                    else:
+                         result["compare_yesterday"] = "0%"
+        else:
+            result["compare_yesterday"] = "无记录"
+    except Exception as e:
+        print(f"Error calculating comparison: {e}")
+    
+    # 6. Save Cache
+    result['timestamp'] = time.time()
+    try:
+        import os
+        os.makedirs(details_dir, exist_ok=True)
+        with open(cache_path, 'w') as f:
+            json.dump(result, f, indent=4)
+    except Exception as e:
+        print(f"Cache save failed: {e}")
+
+    return result
