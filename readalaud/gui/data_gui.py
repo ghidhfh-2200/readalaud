@@ -5,6 +5,8 @@
 import tkinter as tk
 from tkinter import ttk
 import os
+import time
+import wave
 import traceback
 from PIL import Image, ImageTk
 from .. import audio_analasy
@@ -150,6 +152,18 @@ def _build_general_tab(self, general_frame, register_component):
     _bind_mousewheel_to_canvas(data_canvas, data_canvas)
     _bind_mousewheel_to_canvas(scrollable_data_frame, data_canvas)
 
+    # Top Control Area
+    ctrl_frame = tk.Frame(scrollable_data_frame)
+    ctrl_frame.pack(fill="x", padx=10, pady=(10, 0))
+    
+    register_component(
+        "buttons", "general_refresh",
+        tk.Button(
+            ctrl_frame, text="⟳ 刷新仪表盘", font=("微软雅黑", 9),
+            command=lambda: refresh_general_dashboard(self, force_refresh=True)
+        )
+    ).pack(side="right")
+
     # LabelFrame: 数据概览
     basic_data_lf = register_component(
         "frames", "general_basic_lf",
@@ -250,6 +264,18 @@ def _build_day_tab(self, day_frame, register_component):
     self.day_list_container = tk.Frame(day_frame)
     self.day_list_container.pack(fill="both", expand=True)
 
+    # Tool Bar for List
+    list_tools = tk.Frame(self.day_list_container)
+    list_tools.pack(fill="x", padx=10, pady=(5, 0))
+    
+    register_component(
+        "buttons", "day_list_refresh",
+        tk.Button(
+            list_tools, text="⟳ 刷新历史列表", font=("微软雅黑", 9),
+            command=lambda: refresh_general_dashboard(self, force_refresh=True)
+        )
+    ).pack(side="right")
+
     # Treeview
     day_columns = ("date", "duration", "pause", "progress")
     self.day_tree = ttk.Treeview(self.day_list_container, columns=day_columns, show="headings", height=15)
@@ -290,6 +316,7 @@ def _build_day_tab(self, day_frame, register_component):
         tk.Button(
             button_frame, text="← 返回列表", font=self.mainpage_button_font,
             command=lambda: [
+                audio_analasy.stop_day_audio(self=self, reset=True),
                 self.day_detail_container.pack_forget(),
                 self.day_list_container.pack(fill="both", expand=True),
             ],
@@ -338,6 +365,7 @@ def _build_day_tab(self, day_frame, register_component):
     )
     self.volume_chart_canvas.pack(fill="x", padx=15, pady=5)
 
+    # Audio Player
     detail_player_lf = register_component(
         "frames", "day_player_lf",
         tk.LabelFrame(self.detail_scroll_frame, text="当日录音回放", font=self.mainpage_button_font, padx=10, pady=10),
@@ -345,11 +373,23 @@ def _build_day_tab(self, day_frame, register_component):
     detail_player_lf.pack(fill="x", padx=10, pady=15)
     player_controls_detail = tk.Frame(detail_player_lf)
     player_controls_detail.pack(fill="x")
-    tk.Button(player_controls_detail, text="▶", width=4).pack(side="left", padx=5)
-    tk.Button(player_controls_detail, text="⏸", width=4).pack(side="left", padx=5)
-    ttk.Scale(player_controls_detail, from_=0, to=100, orient="horizontal").pack(
-        side="left", fill="x", expand=True, padx=10
+    
+    self.day_play_btn = tk.Button(player_controls_detail, text="▶", width=4, command=self.play_day_audio)
+    self.day_play_btn.pack(side="left", padx=5)
+    self.day_pause_btn = tk.Button(player_controls_detail, text="⏸", width=4, command=self.pause_day_audio)
+    self.day_pause_btn.pack(side="left", padx=5)
+    
+    self.day_audio_scale = ttk.Scale(
+        player_controls_detail, from_=0, to=100, orient="horizontal", 
+        command=lambda _: self.seek_day_audio()
     )
+    self.day_audio_scale.pack(side="left", fill="x", expand=True, padx=10)
+    self.day_audio_scale.bind("<ButtonRelease-1>", lambda _: self.seek_day_audio())
+    
+    self.day_audio_status = tk.Label(detail_player_lf, text="", fg="#dc3545", font=("微软雅黑", 10))
+    self.day_audio_status.pack(anchor="w", padx=5, pady=(6, 0))
+
+    self.init_audio_state()
 
     # Bindings
     def load_detail_data(target_date, force=False):
@@ -367,6 +407,18 @@ def _build_day_tab(self, day_frame, register_component):
             
             # Fetch
             detail_data = audio_analasy.fetch_for_daily_data(self, target_date, force_refresh=force)
+
+            # Update audio path & duration for playback (independent of detail data)
+            account = getattr(self, "current_acount", "")
+            date_str = target_date.strftime("%Y-%m-%d") if hasattr(target_date, "strftime") else str(target_date)
+            audio_path = os.path.join("./details", account, date_str, "recording.wav")
+            st = self._day_audio_state
+            st.update({"path": audio_path, "offset": 0.0, "raw": b""})
+            st["duration"] = audio_analasy.get_audio_duration(audio_path) if os.path.exists(audio_path) else 0.0
+            self.stop_day_audio(reset=True)
+            self.day_audio_scale.config(from_=0, to=max(1, st["duration"]))
+            if hasattr(self, "day_audio_status"):
+                 self.day_audio_status.config(text="", fg="#dc3545")
             
             if not detail_data:
                 for label in self.detail_val_labels.values():
@@ -384,15 +436,28 @@ def _build_day_tab(self, day_frame, register_component):
             
              # Chart
             vol_chart_path = detail_data.get('volume_chart_path', '')
+            self.volume_chart_canvas.delete("all")
+            for child in self.volume_chart_canvas.winfo_children():
+                child.destroy()
+            print("destroyed")
             if vol_chart_path and os.path.exists(vol_chart_path):
+                # 先统一清空：Canvas 图元 + 子控件（上一次的图片 Label）
                 _load_and_display_image(vol_chart_path, self.volume_chart_canvas)
             else:
-                self.volume_chart_canvas.delete("all")
-                w, h = self.volume_chart_canvas.winfo_width(), self.volume_chart_canvas.winfo_height()
-                if w > 1:
-                    self.volume_chart_canvas.create_text(w//2, h//2, text="暂无音量数据", fill="#888888", font=("微软雅黑", 10))
-            
+                self.volume_chart_canvas.update_idletasks()
+                w = self.volume_chart_canvas.winfo_width()
+                h = self.volume_chart_canvas.winfo_height()
+                if w <= 1 or h <= 1:
+                    w, h = 300, 200
+                self.volume_chart_canvas.create_text(
+                    w // 2, h // 2,
+                    text="暂无音量数据",
+                    fill="#888888",
+                    font=("微软雅黑", 10),
+                )
+
             self.day_detail_container.update_idletasks()
+
         except Exception as e:
             print(f"Error loading daily detail: {e}")
             traceback.print_exc()
@@ -416,6 +481,14 @@ def _build_day_tab(self, day_frame, register_component):
             
             # Save State & Load
             self.current_view_date = selected_date
+            
+            self.stop_day_audio(reset=True)
+            st = self._day_audio_state
+            st.update({"path": "", "duration": 0.0, "offset": 0.0, "raw": b""})
+            self.day_audio_scale.config(from_=0, to=100)
+            if hasattr(self, "day_audio_status"):
+                 self.day_audio_status.config(text="", fg="#dc3545")
+            
             load_detail_data(selected_date, force=False)
             
         except Exception as e:
@@ -557,10 +630,10 @@ def _build_audio_tab(self, audio_frame, register_component):
 #  数据面板刷新
 # ══════════════════════════════════════════════════════════
 
-def refresh_general_dashboard(self):
+def refresh_general_dashboard(self, force_refresh=False):
     try:
         # Fetch fresh analysis data
-        dashboard_data = audio_analasy.refresh_dashboard_data(self)
+        dashboard_data = audio_analasy.refresh_dashboard_data(self, force_refresh=force_refresh)
 
         # --- Update Basic Stats in General Tab ---
         if isinstance(dashboard_data, dict):

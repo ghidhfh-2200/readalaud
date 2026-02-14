@@ -1,4 +1,4 @@
-from . import gui, auth, settings, tts,reading,calibration,server,server_manager
+from . import gui, auth, settings, tts,reading,calibration,server,server_manager, audio_analasy
 
 
 class ReadAlaud:
@@ -31,6 +31,7 @@ class ReadAlaud:
         settings.bind_settings(self)
         tts.bind_tts(self)
         reading.bind_reading_api(self)
+        audio_analasy.bind_audio_analasy_api(self)
         calibration.bind_calibration_api(self)
         server.bind_server_api(self)
         server_manager.bind_server_manager_api(self)
