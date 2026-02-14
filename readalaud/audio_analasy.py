@@ -354,7 +354,7 @@ def _save_trend_chart(df, save_path):
         print(f"Error saving trend chart: {e}")
         return False
 
-def refresh_dashboard_data(self):
+def refresh_dashboard_data(self, force_refresh=False):
     """
     [Main Interface] 综合数据看板刷新接口。
     
@@ -380,7 +380,7 @@ def refresh_dashboard_data(self):
     # --- 1. 节流机制检查 (Throttling Check) ---
     current_ts = time.time()
     
-    if os.path.exists(general_path):
+    if not force_refresh and os.path.exists(general_path):
         try:
             with open(general_path, "r") as f:
                 cached_data = json.load(f)
