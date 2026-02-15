@@ -52,6 +52,7 @@ ReadAlaud/
  requirements.txt         # 依赖列表
  LICENSE                  # MIT 许可证
  README.md                # 项目文档
+ web/                     #网页前端相关文件
  readalaud/               # 核心包
     __init__.py
     core.py              # 核心逻辑类
