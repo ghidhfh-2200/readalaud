@@ -18,10 +18,33 @@ def _login_and_sign_up(self):
     if get_input_acount == "" or get_input_acount == None:
         messagebox.showwarning(message="必须输入用户名!", title="警告")
         return
-    with open("./data/acounts.json", "r") as f:
-        read_json = json.load(f)
-        read_names = read_json['names']
-        read_passwords = read_json['passwords']
+
+    # Ensure data directory exists
+    if not os.path.exists("./data"):
+        try:
+            os.makedirs("./data")
+        except Exception as e:
+            messagebox.showerror(message=f"无法创建数据文件夹: {e}")
+            return
+
+    # Ensure acounts.json exists
+    if not os.path.exists("./data/acounts.json"):
+        with open("./data/acounts.json", "w") as f:
+            json.dump({"names":[], "passwords":{}}, f)
+
+    try:
+        with open("./data/acounts.json", "r") as f:
+            read_json = json.load(f)
+            read_names = read_json.get('names', [])
+            read_passwords = read_json.get('passwords', {})
+            # Ensure structure is correct if file was corrupted or empty
+            if 'names' not in read_json: read_json['names'] = []
+            if 'passwords' not in read_json: read_json['passwords'] = {}
+    except (json.JSONDecodeError, FileNotFoundError):
+        read_json = {"names":[], "passwords":{}}
+        read_names = []
+        read_passwords = {}
+
     if read_names == []:
         if_continue = messagebox.askyesno(title="注册新账号？", message="此操作将会注册新账号\n是否继续？")
         if if_continue == True:
@@ -38,7 +61,7 @@ def _login_and_sign_up(self):
                 messagebox.showerror(message="无法写入acounts.json\n请勿移动该文件!")
                 return
             try:
-                os.makedirs(f"./data/{self.current_acount}")
+                os.makedirs(f"./data/{self.current_acount}", exist_ok=True)
                 with open(f"./data/{self.current_acount}/settings.json", "w") as f:
                     write_data = {'goal':0, "stop-dur":0, "db-level":0, "calibration":0, "theme":"darkly", "if_tts": 0}
                     json.dump(write_data, f)
@@ -56,8 +79,29 @@ def _login_and_sign_up(self):
             if decode_password == get_input_password:
                 self.current_acount= encode_input_acount
                 self.if_logged_in = True
-                with open(f"./data/{self.current_acount}/settings.json", "r") as f:
-                    read_settings = json.load(f)
+                
+                # Check and initialize user folder if missing
+                user_data_path = f"./data/{self.current_acount}"
+                if not os.path.exists(user_data_path):
+                    try:
+                        os.makedirs(user_data_path)
+                        with open(f"{user_data_path}/settings.json", "w") as f:
+                            write_data = {'goal':0, "stop-dur":0, "db-level":0, "calibration":0, "theme":"darkly", "if_tts": 0}
+                            json.dump(write_data, f)
+                    except Exception as e:
+                        messagebox.showerror(message=f"无法创建用户数据文件夹: {e}")
+                        return
+
+                try:
+                    with open(f"{user_data_path}/settings.json", "r") as f:
+                        read_settings = json.load(f)
+                except FileNotFoundError:
+                     # Create settings.json if it is missing even if folder exists
+                    with open(f"{user_data_path}/settings.json", "w") as f:
+                        write_data = {'goal':0, "stop-dur":0, "db-level":0, "calibration":0, "theme":"darkly", "if_tts": 0}
+                        json.dump(write_data, f)
+                    read_settings = write_data
+                
                 self.welcome_page(destroy_window=[self.login_frame, "login"])
                 try:
                     import ttkbootstrap as ttkbs
@@ -83,7 +127,7 @@ def _login_and_sign_up(self):
                     return
                 try:
                     print(self.current_acount)
-                    os.makedirs(f"./data/{self.current_acount}")
+                    os.makedirs(f"./data/{self.current_acount}", exist_ok=True)
                     with open(f"./data/{self.current_acount}/settings.json", "w") as f:
                         write_data = {'goal':0, "stop-dur":0, "db-level":0, "calibration":0, "theme":"darkly", "if_tts":0}
                         json.dump(write_data, f)
@@ -104,7 +148,11 @@ def _delete_the_account(self):
             read_accounts['passwords'].pop(self.current_acount)
             with open("./data/acounts.json", "w") as f:
                 json.dump(read_accounts, f)
-            shutil.rmtree(f"./data/{self.current_acount}")
+            try:
+                shutil.rmtree(f"./data/{self.current_acount}")
+                shutil.rmtree(f"./details/{self.current_acount}")
+            except FileNotFoundError:
+                pass
             self.current_acount = ""
             self.current_account_label.config(text=f"当前登录：(未登录)")
             self.if_logged_in = False
@@ -122,11 +170,18 @@ def _reset_account_data(self):
     try:
         if_continue = messagebox.askyesno(message="确定要重置所有数据吗？\n你的密码会保持不变\n其他数据会全部丢失!")
         if if_continue == True:
-            shutil.rmtree(f"./data/{self.current_acount}")
-            os.makedirs(f"./data/{self.current_acount}")
+            # Safely remove directory
+            if os.path.exists(f"./data/{self.current_acount}"):
+                 shutil.rmtree(f"./data/{self.current_acount}")
+            if os.path.exists(f"./details/{self.current_acount}"):
+                shutil.rmtree(f"./details/{self.current_acount}")
+            
+            # Recreate directory
+            os.makedirs(f"./data/{self.current_acount}", exist_ok=True)
             with open(f"./data/{self.current_acount}/settings.json", "w") as f:
                 write_data = {'goal':0, "stop-dur":0, "db-level":0, "calibration":0, "theme":"darkly", "if_tts": 0}
                 json.dump(write_data, f)
+            
             self.current_acount = ""
             self.current_account_label.config(text=f"当前登录：(未登录)")
             self.if_logged_in = False
