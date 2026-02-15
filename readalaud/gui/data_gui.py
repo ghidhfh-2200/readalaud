@@ -8,6 +8,7 @@ import os
 import time
 import wave
 import traceback
+import threading
 from PIL import Image, ImageTk
 from .. import audio_analasy
 
@@ -44,26 +45,25 @@ def _generate_data_gui(self):
     notebook = ttk.Notebook(master=self.data_frame)
     general_frame = register_component("frames", "tab_general", tk.Frame(notebook))
     day_frame = register_component("frames", "tab_day", tk.Frame(notebook))
-    audio_frame = register_component("frames", "tab_audio", tk.Frame(notebook))
 
     notebook.add(general_frame, text="综合")
     notebook.add(day_frame, text="每日数据")
-    notebook.add(audio_frame, text="音频分析")
     notebook.pack(fill="both", expand=True)
 
     # 1. 综合数据
     _build_general_tab(self, general_frame, register_component)
     # 2. 每日数据
     _build_day_tab(self, day_frame, register_component)
-    # 3. 音频分析
-    _build_audio_tab(self, audio_frame, register_component)
 
     # 返回按钮
     back_button = register_component(
         "buttons", "global_return",
         tk.Button(
             master=self.data_frame, text="返回", font=self.mainpage_button_font,
-            command=lambda: self.welcome_page(destroy_window=[self.data_frame, "data_form"]),
+            command=lambda: [
+                self.welcome_page(destroy_window=[self.data_frame, "data_form"]),
+                setattr(self, 'if_audio_analasy_running', False),
+            ],
         ),
     )
     back_button.pack(fill="x", pady=5)
@@ -334,6 +334,15 @@ def _build_day_tab(self, day_frame, register_component):
     )
     refresh_btn.pack(side="left", padx=10)
 
+    analyze_btn = register_component(
+        "buttons", "day_analyze",
+        tk.Button(
+            button_frame, text="📊 音频分析", font=self.mainpage_button_font,
+            command=lambda: _show_analysis_dialog(self)
+        )
+    )
+    analyze_btn.pack(side="left", padx=10)
+
     detail_stats_lf = register_component(
         "frames", "day_detail_lf",
         tk.LabelFrame(self.detail_scroll_frame, text="数据详情", font=self.mainpage_button_font, padx=10, pady=10),
@@ -390,6 +399,53 @@ def _build_day_tab(self, day_frame, register_component):
     self.day_audio_status.pack(anchor="w", padx=5, pady=(6, 0))
 
     self.init_audio_state()
+
+    # ─── Audio Analysis Results Container (Hidden initially) ───
+    self.day_analysis_container = tk.Frame(day_frame)
+
+    _analysis_canvas = register_component(
+        "canvases", "analysis_scroll", tk.Canvas(self.day_analysis_container)
+    )
+    _analysis_vbar = ttk.Scrollbar(
+        self.day_analysis_container, orient="vertical", command=_analysis_canvas.yview
+    )
+    self._analysis_scroll_content = tk.Frame(_analysis_canvas)
+    self._analysis_scroll_content.bind(
+        "<Configure>",
+        lambda _: _analysis_canvas.configure(scrollregion=_analysis_canvas.bbox("all")),
+    )
+    _acw = _analysis_canvas.create_window(
+        (0, 0), window=self._analysis_scroll_content, anchor="nw"
+    )
+    _analysis_canvas.bind(
+        "<Configure>", lambda e: _analysis_canvas.itemconfig(_acw, width=e.width)
+    )
+    _analysis_canvas.configure(yscrollcommand=_analysis_vbar.set)
+
+    _analysis_vbar.pack(side="right", fill="y")
+    _analysis_canvas.pack(side="left", fill="both", expand=True)
+
+    _bind_mousewheel_to_canvas(self.day_analysis_container, _analysis_canvas)
+    _bind_mousewheel_to_canvas(_analysis_canvas, _analysis_canvas)
+    _bind_mousewheel_to_canvas(self._analysis_scroll_content, _analysis_canvas)
+
+    _ab_frame = tk.Frame(self._analysis_scroll_content)
+    _ab_frame.pack(anchor="w", padx=10, pady=5, fill="x")
+
+    register_component(
+        "buttons", "analysis_back",
+        tk.Button(
+            _ab_frame, text="← 返回详情", font=self.mainpage_button_font,
+            command=lambda: [
+                self.day_analysis_container.pack_forget(),
+                self.day_detail_container.pack(fill="both", expand=True),
+                setattr(self, 'if_audio_analasy_running', False)
+            ],
+        )
+    ).pack(side="left")
+
+    self._analysis_results_frame = tk.Frame(self._analysis_scroll_content)
+    self._analysis_results_frame.pack(fill="both", expand=True, padx=10, pady=5)
 
     # Bindings
     def load_detail_data(target_date, force=False):
@@ -498,133 +554,177 @@ def _build_day_tab(self, day_frame, register_component):
 
 
 # ══════════════════════════════════════════════════════════
-#  Tab 3 – 音频分析
+#  每日数据 – 音频分析弹窗 & 异步绘制
 # ══════════════════════════════════════════════════════════
 
-def _build_audio_tab(self, audio_frame, register_component):
-    audio_canvas = register_component(
-        "canvases", "audio_scroll",
-        tk.Canvas(audio_frame, bg="white", highlightthickness=0),
-    )
-    audio_scrollbar = ttk.Scrollbar(audio_frame, orient="vertical", command=audio_canvas.yview)
-    audio_scroll_content = tk.Frame(audio_canvas, bg="white")
+def _show_analysis_dialog(self):
+    """弹出复选框对话框，让用户选择要执行的音频分析项目。"""
+    dialog = tk.Toplevel(self.main_window)
+    dialog.title("选择音频分析项目")
+    dialog.geometry("360x480")
+    dialog.resizable(False, False)
+    dialog.transient(self.main_window)
+    dialog.grab_set()
 
-    audio_canvas_window = audio_canvas.create_window((0, 0), window=audio_scroll_content, anchor="nw")
-    audio_canvas.configure(yscrollcommand=audio_scrollbar.set)
-    audio_canvas.pack(side="left", fill="both", expand=True)
-    audio_scrollbar.pack(side="right", fill="y")
+    # 居中于主窗口
+    dialog.update_idletasks()
+    px = self.main_window.winfo_rootx() + (self.main_window.winfo_width() - 360) // 2
+    py = self.main_window.winfo_rooty() + (self.main_window.winfo_height() - 480) // 2
+    dialog.geometry(f"+{max(0, px)}+{max(0, py)}")
 
-    audio_scroll_content.bind(
-        "<Configure>", lambda _: audio_canvas.configure(scrollregion=audio_canvas.bbox("all"))
-    )
-    audio_canvas.bind("<Configure>", lambda e: audio_canvas.itemconfig(audio_canvas_window, width=e.width))
-    _bind_mousewheel_to_canvas(audio_frame, audio_canvas)
-    _bind_mousewheel_to_canvas(audio_canvas, audio_canvas)
-    _bind_mousewheel_to_canvas(audio_scroll_content, audio_canvas)
+    tk.Label(
+        dialog, text="请勾选需要分析的项目：", font=("微软雅黑", 11)
+    ).pack(anchor="w", padx=15, pady=(12, 6))
 
-    section_title_font = ("微软雅黑", 12, "bold")
-    subsection_font = ("微软雅黑", 10, "bold")
+    analysis_options = [
+        ("vad",         "语音活动检测 (VAD)"),
+        ("rms",         "短时能量 (RMS)"),
+        ("ltas",        "长时平均能量 (10s 切片)"),
+        ("zcr",         "过零率变化"),
+        ("pitch",       "基频变化 (F0)"),
+        ("snr",         "信噪比 (SNR)"),
+        ("mfcc",        "梅尔倒谱 (MFCC)"),
+        ("crest",       "峰值因子 (Crest Factor)"),
+        ("entropy",     "频谱熵 (Spectral Entropy)"),
+        ("spectrogram", "语谱图 (Spectrogram)"),
+    ]
 
-    def add_section(parent, title, key=""):
-        frame = tk.LabelFrame(parent, text=title, font=section_title_font, bg="white", fg="#333", padx=10, pady=10)
-        frame.pack(fill="x", padx=10, pady=10)
-        if key:
-            register_component("frames", key, frame)
-        return frame
+    cb_vars = {}
+    for key, label in analysis_options:
+        var = tk.BooleanVar(value=True)
+        tk.Checkbutton(
+            dialog, text=label, variable=var, font=("微软雅黑", 10), anchor="w"
+        ).pack(fill="x", padx=20, pady=2)
+        cb_vars[key] = var
 
-    def add_canvas(parent, height, key_name, bg="#202020"):
-        canvas = tk.Canvas(parent, height=height, bg=bg, highlightthickness=0)
-        canvas.pack(fill="x", pady=6)
-        register_component("canvases", key_name, canvas)
-        return canvas
+    # 全选 / 全不选
+    sel_frame = tk.Frame(dialog)
+    sel_frame.pack(fill="x", padx=20, pady=(8, 0))
+    tk.Button(
+        sel_frame, text="全选", font=("微软雅黑", 9),
+        command=lambda: [v.set(True) for v in cb_vars.values()],
+    ).pack(side="left", padx=(0, 6))
+    tk.Button(
+        sel_frame, text="全不选", font=("微软雅黑", 9),
+        command=lambda: [v.set(False) for v in cb_vars.values()],
+    ).pack(side="left")
 
-    # (1) VAD
-    vad_section = add_section(audio_scroll_content, "语音活动检测 (Voice Activity Detection)", "audio_sct_vad")
-    register_component(
-        "labels", "audio_vad_hint",
-        tk.Label(vad_section, text="静默时间点 (Time-Line)", font=subsection_font, bg="white"),
-    ).pack(anchor="w", pady=(0, 6))
+    # 确定 / 取消
+    btn_frame = tk.Frame(dialog)
+    btn_frame.pack(side="bottom", pady=14)
 
-    vad_cols = ("start", "end", "duration")
-    self.vad_silence_tree = ttk.Treeview(vad_section, columns=vad_cols, show="headings", height=6)
-    for col, txt, w in zip(vad_cols, ("开始时间", "结束时间", "持续时长"), (110, 110, 100)):
-        self.vad_silence_tree.heading(col, text=txt)
-        self.vad_silence_tree.column(col, width=w, anchor="center")
-    vad_scroll = ttk.Scrollbar(vad_section, orient="vertical", command=self.vad_silence_tree.yview)
-    self.vad_silence_tree.configure(yscrollcommand=vad_scroll.set)
-    self.vad_silence_tree.pack(side="left", fill="both", expand=True)
-    vad_scroll.pack(side="right", fill="y")
+    def on_confirm():
+        selected = [k for k, v in cb_vars.items() if v.get()]
+        dialog.destroy()
+        if selected:
+            _start_audio_analysis(self, selected)
 
-    # (2) Quality Assessment
-    quality_section = add_section(audio_scroll_content, "朗读质量评估", "audio_sct_qual")
+    tk.Button(
+        btn_frame, text="确定", width=10, font=("微软雅黑", 10), command=on_confirm
+    ).pack(side="left", padx=8)
+    tk.Button(
+        btn_frame, text="取消", width=10, font=("微软雅黑", 10), command=dialog.destroy
+    ).pack(side="left", padx=8)
 
-    register_component(
-        "labels", "audio_rms_t",
-        tk.Label(quality_section, text="短时能量 (RMS) ", font=subsection_font, bg="white"),
-    ).pack(anchor="w")
-    self.rms_canvas = add_canvas(quality_section, 120, "audio_rms")
 
-    register_component(
-        "labels", "audio_zcr_t",
-        tk.Label(quality_section, text="过零率与分贝叠加图", font=subsection_font, bg="white"),
-    ).pack(anchor="w", pady=(12, 0))
-    self.zcr_db_canvas = add_canvas(quality_section, 140, "audio_zcr")
+def _start_audio_analysis(self, selected_keys):
+    """切换到分析结果 Frame 并启动后台线程异步绘图。"""
+    st = getattr(self, "_day_audio_state", {})
+    audio_path = st.get("path", "")
+    date_str = getattr(self, "current_view_date", "")
 
-    register_component(
-        "labels", "audio_zcr_list_t",
-        tk.Label(quality_section, text="高过零率时间点", font=subsection_font, bg="white"),
-    ).pack(anchor="w", pady=(6, 0))
-    zcr_cols = ("time", "zcr", "db")
-    self.high_zcr_tree = ttk.Treeview(quality_section, columns=zcr_cols, show="headings", height=4)
-    for col, txt, w in zip(zcr_cols, ("时间", "ZCR", "dB"), (120, 80, 80)):
-        self.high_zcr_tree.heading(col, text=txt)
-        self.high_zcr_tree.column(col, width=w, anchor="center")
-    self.high_zcr_tree.pack(fill="x", pady=(2, 8))
+    # 切换视图: 详情 → 分析
+    self.day_detail_container.pack_forget()
+    self.day_analysis_container.pack(fill="both", expand=True)
 
-    register_component(
-        "labels", "audio_crest_t",
-        tk.Label(quality_section, text="峰值因子 (Crest Factor) 谱", font=subsection_font, bg="white"),
-    ).pack(anchor="w")
-    self.crest_canvas = add_canvas(quality_section, 120, "audio_crest")
+    # 清除上次分析结果
+    for w in self._analysis_results_frame.winfo_children():
+        w.destroy()
 
-    register_component(
-        "labels", "audio_ltas_t",
-        tk.Label(quality_section, text="长时平均能量 (LTAS)", font=subsection_font, bg="white"),
-    ).pack(anchor="w", pady=(12, 4))
-    ltas_cols = ("band", "energy")
-    self.long_term_energy_tree = ttk.Treeview(quality_section, columns=ltas_cols, show="headings", height=5)
-    for col, txt, w in zip(ltas_cols, ("频段", "能量值"), (140, 160)):
-        self.long_term_energy_tree.heading(col, text=txt)
-        self.long_term_energy_tree.column(col, width=w, anchor="center")
-    self.long_term_energy_tree.pack(fill="x", pady=(0, 8))
+    if not audio_path or not os.path.exists(audio_path):
+        tk.Label(
+            self._analysis_results_frame,
+            text="⚠ 当前日期无可用音频文件，无法进行分析。",
+            fg="#dc3545", font=("微软雅黑", 12),
+        ).pack(pady=30)
+        return
 
-    register_component(
-        "labels", "audio_spec_t",
-        tk.Label(quality_section, text="语谱图 (Spectrogram)", font=subsection_font, bg="white"),
-    ).pack(anchor="w")
-    self.spectrogram_canvas = add_canvas(quality_section, 160, "audio_spectrogram")
+    # 停止播放
+    audio_analasy.stop_day_audio(self, reset=True)
 
-    register_component(
-        "labels", "audio_env_t",
-        tk.Label(quality_section, text="音量包络 (Energy Envelope)", font=subsection_font, bg="white"),
-    ).pack(anchor="w", pady=(12, 0))
-    self.envelope_canvas = add_canvas(quality_section, 100, "audio_envelope")
+    # 创建加载占位
+    placeholders = {}
+    for key in selected_keys:
+        title = audio_analasy.ANALYSIS_ITEMS.get(key, key)
+        lf = tk.LabelFrame(
+            self._analysis_results_frame, text=title,
+            font=("微软雅黑", 11, "bold"), padx=8, pady=8,
+        )
+        lf.pack(fill="x", pady=6)
+        tk.Label(lf, text="⏳ 分析中…", fg="#888888", font=("微软雅黑", 10)).pack(anchor="w")
+        placeholders[key] = lf
 
-    register_component(
-        "labels", "audio_entr_t",
-        tk.Label(quality_section, text="频谱熵 (Spectral Entropy)", font=subsection_font, bg="white"),
-    ).pack(anchor="w", pady=(12, 0))
-    self.spectral_entropy_canvas = add_canvas(quality_section, 120, "audio_entropy")
+    # 异步后台分析
+    account = getattr(self, "current_acount", "")
+    output_dir = os.path.join("./details", account, str(date_str))
 
-    register_component(
-        "labels", "audio_pitch_t",
-        tk.Label(quality_section, text="音高曲线 (Pitch Contour)", font=subsection_font, bg="white"),
-    ).pack(anchor="w", pady=(12, 0))
-    self.pitch_canvas = add_canvas(quality_section, 120, "audio_pitch")
+    def _bg_worker():
+        if self.if_audio_analasy_running==True:
+            return
+        self.if_audio_analasy_running = True
+        time.sleep(0.2)  # 等待 GUI 渲染完成
 
-    audio_scroll_content.update_idletasks()
-    audio_canvas.configure(scrollregion=audio_canvas.bbox("all"))
+        def _on_done(key, result):
+            self.day_analysis_container.after(
+                0, lambda k=key, r=result: _on_single_analysis_done(self, k, r, placeholders)
+            )
 
+        audio_analasy.run_selected_analyses(
+            audio_path, selected_keys, output_dir, on_item_done=_on_done
+        )
+
+    threading.Thread(target=_bg_worker, daemon=True).start()
+
+
+def _on_single_analysis_done(self, key, result, placeholders):
+    """后台单项分析完成后在主线程刷新对应区域。"""
+    lf = placeholders.get(key)
+    if not lf or not lf.winfo_exists():
+        return
+
+    for w in lf.winfo_children():
+        w.destroy()
+
+    if "error" in result:
+        tk.Label(
+            lf, text=f"❌ 分析失败: {result['error']}",
+            fg="#dc3545", font=("微软雅黑", 10),
+        ).pack(anchor="w")
+        return
+
+    # 加载图表
+    chart_path = result.get("path", "")
+    if chart_path and os.path.exists(chart_path):
+        try:
+            pil_img = Image.open(chart_path)
+            tk_img = ImageTk.PhotoImage(pil_img)
+            img_label = tk.Label(lf, image=tk_img)
+            img_label.image = tk_img  # prevent GC
+            img_label.pack(fill="x", expand=True)
+        except Exception as e:
+            tk.Label(
+                lf, text=f"图表加载失败: {e}", fg="#dc3545", font=("微软雅黑", 10),
+            ).pack(anchor="w")
+    else:
+        tk.Label(lf, text="无图表数据", fg="gray", font=("微软雅黑", 10)).pack(anchor="w")
+
+    # 附加信息
+    extra = result.get("extra", {})
+    if extra:
+        info_text = "  |  ".join(f"{k}: {v}" for k, v in extra.items())
+        tk.Label(lf, text=info_text, fg="#6c757d", font=("微软雅黑", 9)).pack(
+            anchor="w", pady=(4, 0)
+        )
 
 # ══════════════════════════════════════════════════════════
 #  数据面板刷新

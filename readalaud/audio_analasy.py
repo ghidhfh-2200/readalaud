@@ -8,6 +8,9 @@ import matplotlib
 import matplotlib.pyplot as plt
 import calmap
 import numpy as np
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+from matplotlib import cm as _mpl_cm
 
 def bind_audio_analasy_api(instance):
     instance.stop_day_audio = lambda reset=False: stop_day_audio(instance, reset)
@@ -682,3 +685,460 @@ def fetch_for_daily_data(self, date_input, force_refresh=False):
         print(f"Cache save failed: {e}")
 
     return result
+
+
+# ══════════════════════════════════════════════════════════
+#  音频分析 – 后端引擎 (Thread-Safe)
+# ══════════════════════════════════════════════════════════
+
+ANALYSIS_ITEMS = {
+    "vad":         "语音活动检测 (VAD)",
+    "rms":         "短时能量 (RMS)",
+    "ltas":        "长时平均能量 (10s 切片)",
+    "zcr":         "过零率变化",
+    "pitch":       "基频变化 (F0)",
+    "snr":         "信噪比 (SNR)",
+    "mfcc":        "梅尔倒谱 (MFCC)",
+    "crest":       "峰值因子 (Crest Factor)",
+    "entropy":     "频谱熵 (Spectral Entropy)",
+    "spectrogram": "语谱图 (Spectrogram)",
+}
+
+
+# ─── 工具函数 ───
+
+def _load_wav_as_array(path):
+    """读取 WAV 文件并返回 (mono float64 归一化采样, 采样率)。"""
+    with wave.open(path, 'rb') as wf:
+        ch = wf.getnchannels()
+        sw = wf.getsampwidth()
+        sr = wf.getframerate()
+        raw = wf.readframes(wf.getnframes())
+    dtype_map = {1: np.uint8, 2: np.int16, 4: np.int32}
+    dtype = dtype_map.get(sw, np.int16)
+    samples = np.frombuffer(raw, dtype=dtype).astype(np.float64)
+    if dtype == np.uint8:
+        samples = (samples - 128) / 128.0
+    else:
+        samples /= 2 ** (sw * 8 - 1)
+    if ch > 1:
+        samples = samples.reshape(-1, ch).mean(axis=1)
+    return samples, sr
+
+
+def _make_fig(w=10, h=3):
+    """创建线程安全的 matplotlib Figure（不使用 pyplot）。"""
+    fig = Figure(figsize=(w, h), dpi=100, facecolor='white')
+    FigureCanvas(fig)
+    return fig
+
+
+def _save_fig(fig, path):
+    fig.savefig(path, bbox_inches='tight', dpi=100, facecolor='white')
+
+
+def _frame_signal(samples, frame_len, hop_len):
+    """将信号切分为重叠帧。短于一帧的信号会被补零。"""
+    n = len(samples)
+    if n < frame_len:
+        samples = np.pad(samples, (0, frame_len - n))
+        n = frame_len
+    num_frames = 1 + (n - frame_len) // hop_len
+    indices = (
+        np.arange(frame_len)[None, :] + np.arange(num_frames)[:, None] * hop_len
+    )
+    return samples[indices]
+
+
+# ─── 各项分析实现 ───
+
+def _analyze_vad(samples, sr, output_path):
+    """VAD：基于短时能量的语音活动检测。"""
+    frame_len = int(0.025 * sr)
+    hop_len = int(0.010 * sr)
+    frames = _frame_signal(samples, frame_len, hop_len)
+    energy = np.sum(frames ** 2, axis=1)
+
+    threshold = np.mean(energy) * 0.1 if np.mean(energy) > 0 else 1e-10
+    is_speech = energy > threshold
+    times = np.arange(len(energy)) * hop_len / sr
+
+    fig = _make_fig(10, 2.5)
+    ax = fig.add_subplot(111)
+    e_norm = energy / energy.max() if energy.max() > 0 else energy
+    ax.fill_between(times, is_speech.astype(float), alpha=0.4, color='#28a745', label='语音段')
+    ax.plot(times, e_norm, color='#007acc', linewidth=0.5, alpha=0.6, label='能量')
+    ax.set_xlabel('时间 (s)', fontproperties="Microsoft YaHei")
+    ax.set_ylabel('活动', fontproperties="Microsoft YaHei")
+    ax.set_title('语音活动检测 (VAD)', fontproperties="Microsoft YaHei", fontsize=10)
+    ax.legend(prop={"family": "Microsoft YaHei", "size": 8})
+    ax.set_ylim(-0.05, 1.15)
+    fig.tight_layout()
+    _save_fig(fig, output_path)
+
+    speech_ratio = np.sum(is_speech) / len(is_speech) if len(is_speech) > 0 else 0
+    return {"语音占比": f"{speech_ratio:.1%}"}
+
+
+def _analyze_rms(samples, sr, output_path):
+    """短时 RMS 能量。"""
+    frame_len = int(0.025 * sr)
+    hop_len = int(0.010 * sr)
+    frames = _frame_signal(samples, frame_len, hop_len)
+    rms = np.sqrt(np.mean(frames ** 2, axis=1))
+    times = np.arange(len(rms)) * hop_len / sr
+
+    fig = _make_fig(10, 3)
+    ax = fig.add_subplot(111)
+    ax.plot(times, rms, color='#ff6f00', linewidth=0.8)
+    ax.fill_between(times, rms, alpha=0.2, color='#ff6f00')
+    ax.set_xlabel('时间 (s)', fontproperties="Microsoft YaHei")
+    ax.set_ylabel('RMS', fontproperties="Microsoft YaHei")
+    ax.set_title('短时能量 (RMS)', fontproperties="Microsoft YaHei", fontsize=10)
+    fig.tight_layout()
+    _save_fig(fig, output_path)
+    return {"均值RMS": f"{np.mean(rms):.4f}", "最大RMS": f"{np.max(rms):.4f}"}
+
+
+def _analyze_ltas(samples, sr, output_path):
+    """长时平均能量谱 (LTAS)，每 10 秒切片一次。"""
+    slice_len = 10 * sr
+    n_slices = max(1, len(samples) // slice_len)
+    nfft = 2048
+
+    fig = _make_fig(10, 4)
+    ax = fig.add_subplot(111)
+    colors = _mpl_cm.viridis(np.linspace(0, 1, n_slices))
+
+    for i in range(n_slices):
+        start = i * slice_len
+        end = min(start + slice_len, len(samples))
+        segment = samples[start:end]
+        if len(segment) < nfft:
+            segment = np.pad(segment, (0, nfft - len(segment)))
+
+        window = np.hanning(nfft)
+        n_sub = max(1, len(segment) // nfft)
+        spectrum = np.zeros(nfft // 2 + 1)
+        for j in range(n_sub):
+            chunk = segment[j * nfft: (j + 1) * nfft]
+            if len(chunk) < nfft:
+                chunk = np.pad(chunk, (0, nfft - len(chunk)))
+            spectrum += np.abs(np.fft.rfft(chunk * window))
+        spectrum /= n_sub
+        spectrum_db = 20 * np.log10(spectrum + 1e-10)
+        freqs = np.fft.rfftfreq(nfft, 1.0 / sr)
+
+        label = f"{i*10}-{min((i+1)*10, len(samples)/sr):.0f}s"
+        ax.plot(freqs, spectrum_db, color=colors[i], linewidth=0.8, alpha=0.7, label=label)
+
+    ax.set_xlabel('频率 (Hz)', fontproperties="Microsoft YaHei")
+    ax.set_ylabel('幅度 (dB)', fontproperties="Microsoft YaHei")
+    ax.set_title('长时平均能量谱 (LTAS, 10s 切片)', fontproperties="Microsoft YaHei", fontsize=10)
+    if n_slices <= 12:
+        ax.legend(prop={"family": "Microsoft YaHei", "size": 7}, loc='upper right', ncol=2)
+    ax.set_xlim(0, sr / 2)
+    fig.tight_layout()
+    _save_fig(fig, output_path)
+    return {"切片数": n_slices}
+
+
+def _analyze_zcr(samples, sr, output_path):
+    """过零率随时间变化。"""
+    frame_len = int(0.025 * sr)
+    hop_len = int(0.010 * sr)
+    frames = _frame_signal(samples, frame_len, hop_len)
+    zcr = np.sum(np.abs(np.diff(np.sign(frames), axis=1)), axis=1) / (2 * frame_len)
+    times = np.arange(len(zcr)) * hop_len / sr
+
+    fig = _make_fig(10, 3)
+    ax = fig.add_subplot(111)
+    ax.plot(times, zcr, color='#e91e63', linewidth=0.7)
+    ax.fill_between(times, zcr, alpha=0.15, color='#e91e63')
+    ax.set_xlabel('时间 (s)', fontproperties="Microsoft YaHei")
+    ax.set_ylabel('ZCR', fontproperties="Microsoft YaHei")
+    ax.set_title('过零率变化', fontproperties="Microsoft YaHei", fontsize=10)
+    fig.tight_layout()
+    _save_fig(fig, output_path)
+    return {"平均ZCR": f"{np.mean(zcr):.4f}"}
+
+
+def _analyze_pitch(samples, sr, output_path):
+    """基频 (F0) 估计 – FFT 自相关法。"""
+    frame_len = int(0.040 * sr)
+    hop_len = int(0.020 * sr)
+    frames = _frame_signal(samples, frame_len, hop_len)
+
+    f0_min, f0_max = 80, 400
+    lag_min = max(1, int(sr / f0_max))
+    lag_max = min(frame_len - 1, int(sr / f0_min))
+    fft_size = 2 ** int(np.ceil(np.log2(2 * frame_len)))
+
+    pitches = np.zeros(len(frames))
+    for i, frame in enumerate(frames):
+        frame = frame - np.mean(frame)
+        if np.max(np.abs(frame)) < 1e-6:
+            continue
+        fft_f = np.fft.rfft(frame, n=fft_size)
+        acf = np.fft.irfft(fft_f * np.conj(fft_f))[:frame_len]
+        if acf[0] > 0:
+            acf /= acf[0]
+        region = acf[lag_min:lag_max + 1]
+        if len(region) == 0:
+            continue
+        peak_idx = np.argmax(region) + lag_min
+        if acf[peak_idx] > 0.25:
+            pitches[i] = sr / peak_idx
+
+    times = np.arange(len(pitches)) * hop_len / sr
+    pitch_masked = np.where(pitches > 0, pitches, np.nan)
+
+    fig = _make_fig(10, 3)
+    ax = fig.add_subplot(111)
+    ax.plot(times, pitch_masked, color='#9c27b0', linewidth=0.8, marker='.', markersize=1)
+    ax.set_xlabel('时间 (s)', fontproperties="Microsoft YaHei")
+    ax.set_ylabel('频率 (Hz)', fontproperties="Microsoft YaHei")
+    ax.set_title('基频变化 (F0)', fontproperties="Microsoft YaHei", fontsize=10)
+    ax.set_ylim(f0_min - 20, f0_max + 50)
+    fig.tight_layout()
+    _save_fig(fig, output_path)
+
+    valid = pitches[pitches > 0]
+    mean_f0 = f"{np.mean(valid):.1f} Hz" if len(valid) > 0 else "N/A"
+    return {"平均F0": mean_f0}
+
+
+def _analyze_snr(samples, sr, output_path):
+    """信噪比估计：以最低 10% 能量帧为噪声基底。"""
+    frame_len = int(0.025 * sr)
+    hop_len = int(0.010 * sr)
+    frames = _frame_signal(samples, frame_len, hop_len)
+    energy = np.sum(frames ** 2, axis=1)
+
+    sorted_energy = np.sort(energy)
+    n_noise = max(1, len(sorted_energy) // 10)
+    noise_floor = np.mean(sorted_energy[:n_noise])
+    signal_power = np.mean(energy)
+    snr_global = 10 * np.log10(signal_power / (noise_floor + 1e-10))
+
+    snr_frames = 10 * np.log10(energy / (noise_floor + 1e-10))
+    snr_frames = np.clip(snr_frames, -20, 60)
+    times = np.arange(len(snr_frames)) * hop_len / sr
+
+    fig = _make_fig(10, 3)
+    ax = fig.add_subplot(111)
+    ax.plot(times, snr_frames, color='#00bcd4', linewidth=0.7)
+    ax.axhline(y=snr_global, color='#ff5722', linestyle='--', linewidth=1,
+               label=f'全局 SNR: {snr_global:.1f} dB')
+    ax.fill_between(times, snr_frames, alpha=0.1, color='#00bcd4')
+    ax.set_xlabel('时间 (s)', fontproperties="Microsoft YaHei")
+    ax.set_ylabel('SNR (dB)', fontproperties="Microsoft YaHei")
+    ax.set_title('信噪比 (SNR)', fontproperties="Microsoft YaHei", fontsize=10)
+    ax.legend(prop={"family": "Microsoft YaHei", "size": 8})
+    fig.tight_layout()
+    _save_fig(fig, output_path)
+    return {"全局SNR": f"{snr_global:.1f} dB"}
+
+
+def _analyze_mfcc(samples, sr, output_path):
+    """梅尔频率倒谱系数 (MFCC)。"""
+    n_mfcc, n_mels, nfft = 13, 40, 2048
+    frame_len = int(0.025 * sr)
+    hop_len = int(0.020 * sr)
+
+    frames = _frame_signal(samples, frame_len, hop_len)
+    window = np.hanning(frame_len)
+
+    # 补零至 nfft
+    if frame_len < nfft:
+        frames = np.pad(frames, ((0, 0), (0, nfft - frame_len)))
+        window = np.pad(window, (0, nfft - frame_len))
+
+    power = np.abs(np.fft.rfft(frames * window, n=nfft)) ** 2
+
+    # Mel 滤波器组
+    mel_min = 2595 * np.log10(1 + 0 / 700)
+    mel_max = 2595 * np.log10(1 + sr / 2 / 700)
+    mel_pts = np.linspace(mel_min, mel_max, n_mels + 2)
+    hz_pts = 700 * (10 ** (mel_pts / 2595) - 1)
+    bins = np.floor((nfft + 1) * hz_pts / sr).astype(int)
+
+    fbank = np.zeros((n_mels, nfft // 2 + 1))
+    for m in range(n_mels):
+        for k in range(bins[m], bins[m + 1]):
+            if bins[m + 1] > bins[m]:
+                fbank[m, k] = (k - bins[m]) / (bins[m + 1] - bins[m])
+        for k in range(bins[m + 1], bins[m + 2]):
+            if bins[m + 2] > bins[m + 1]:
+                fbank[m, k] = (bins[m + 2] - k) / (bins[m + 2] - bins[m + 1])
+
+    mel_spec = np.log(power @ fbank.T + 1e-10)
+
+    # Type-II DCT
+    dct_mat = np.zeros((n_mfcc, n_mels))
+    for i in range(n_mfcc):
+        for j in range(n_mels):
+            dct_mat[i, j] = np.cos(np.pi * i * (j + 0.5) / n_mels)
+    mfccs = mel_spec @ dct_mat.T  # (n_frames, n_mfcc)
+
+    times = np.arange(mfccs.shape[0]) * hop_len / sr
+
+    fig = _make_fig(10, 4)
+    ax = fig.add_subplot(111)
+    im = ax.imshow(
+        mfccs.T, aspect='auto', origin='lower', cmap='coolwarm',
+        extent=[times[0], times[-1], 0, n_mfcc],
+    )
+    ax.set_xlabel('时间 (s)', fontproperties="Microsoft YaHei")
+    ax.set_ylabel('MFCC 系数', fontproperties="Microsoft YaHei")
+    ax.set_title('梅尔倒谱系数 (MFCC)', fontproperties="Microsoft YaHei", fontsize=10)
+    fig.colorbar(im, ax=ax, label='幅值')
+    fig.tight_layout()
+    _save_fig(fig, output_path)
+    return {}
+
+
+def _analyze_crest(samples, sr, output_path):
+    """峰值因子 (Crest Factor)。"""
+    frame_len = int(0.025 * sr)
+    hop_len = int(0.010 * sr)
+    frames = _frame_signal(samples, frame_len, hop_len)
+
+    rms = np.sqrt(np.mean(frames ** 2, axis=1))
+    peak = np.max(np.abs(frames), axis=1)
+    crest_db = 20 * np.log10(peak / (rms + 1e-10) + 1e-10)
+    times = np.arange(len(crest_db)) * hop_len / sr
+
+    fig = _make_fig(10, 3)
+    ax = fig.add_subplot(111)
+    ax.plot(times, crest_db, color='#795548', linewidth=0.7)
+    ax.set_xlabel('时间 (s)', fontproperties="Microsoft YaHei")
+    ax.set_ylabel('峰值因子 (dB)', fontproperties="Microsoft YaHei")
+    ax.set_title('峰值因子 (Crest Factor)', fontproperties="Microsoft YaHei", fontsize=10)
+    fig.tight_layout()
+    _save_fig(fig, output_path)
+    return {"平均峰值因子": f"{np.mean(crest_db):.1f} dB"}
+
+
+def _analyze_entropy(samples, sr, output_path):
+    """频谱熵。"""
+    frame_len = int(0.025 * sr)
+    hop_len = int(0.020 * sr)
+    nfft = 1024
+    frames = _frame_signal(samples, frame_len, hop_len)
+    window = np.hanning(frame_len)
+
+    if frame_len < nfft:
+        frames = np.pad(frames, ((0, 0), (0, nfft - frame_len)))
+        window = np.pad(window, (0, nfft - frame_len))
+
+    power = np.abs(np.fft.rfft(frames * window, n=nfft)) ** 2
+    total = np.sum(power, axis=1, keepdims=True) + 1e-10
+    prob = power / total
+    entropy = -np.sum(prob * np.log2(prob + 1e-10), axis=1)
+
+    max_entropy = np.log2(power.shape[1])
+    entropy_norm = entropy / max_entropy
+    times = np.arange(len(entropy_norm)) * hop_len / sr
+
+    fig = _make_fig(10, 3)
+    ax = fig.add_subplot(111)
+    ax.plot(times, entropy_norm, color='#4caf50', linewidth=0.7)
+    ax.fill_between(times, entropy_norm, alpha=0.15, color='#4caf50')
+    ax.set_xlabel('时间 (s)', fontproperties="Microsoft YaHei")
+    ax.set_ylabel('归一化频谱熵', fontproperties="Microsoft YaHei")
+    ax.set_title('频谱熵 (Spectral Entropy)', fontproperties="Microsoft YaHei", fontsize=10)
+    ax.set_ylim(0, 1.05)
+    fig.tight_layout()
+    _save_fig(fig, output_path)
+    return {"平均熵": f"{np.mean(entropy_norm):.3f}"}
+
+
+def _analyze_spectrogram(samples, sr, output_path):
+    """语谱图 (Spectrogram)。"""
+    nfft = 2048
+    frame_len = int(0.025 * sr)
+    hop_len = int(0.020 * sr)
+    frames = _frame_signal(samples, frame_len, hop_len)
+    window = np.hanning(frame_len)
+
+    if frame_len < nfft:
+        frames = np.pad(frames, ((0, 0), (0, nfft - frame_len)))
+        window = np.pad(window, (0, nfft - frame_len))
+
+    mag_db = 20 * np.log10(np.abs(np.fft.rfft(frames * window, n=nfft)) + 1e-10)
+    times = np.arange(mag_db.shape[0]) * hop_len / sr
+    freqs = np.fft.rfftfreq(nfft, 1.0 / sr)
+
+    fig = _make_fig(10, 4)
+    ax = fig.add_subplot(111)
+    im = ax.imshow(
+        mag_db.T, aspect='auto', origin='lower', cmap='inferno',
+        extent=[times[0], times[-1], freqs[0], freqs[-1]],
+    )
+    ax.set_xlabel('时间 (s)', fontproperties="Microsoft YaHei")
+    ax.set_ylabel('频率 (Hz)', fontproperties="Microsoft YaHei")
+    ax.set_title('语谱图 (Spectrogram)', fontproperties="Microsoft YaHei", fontsize=10)
+    fig.colorbar(im, ax=ax, label='幅度 (dB)')
+    ax.set_ylim(0, min(8000, sr / 2))
+    fig.tight_layout()
+    _save_fig(fig, output_path)
+    return {}
+
+
+# ─── 分析注册表 & 调度器 ───
+
+_ANALYSIS_FUNCS = {
+    "vad":         _analyze_vad,
+    "rms":         _analyze_rms,
+    "ltas":        _analyze_ltas,
+    "zcr":         _analyze_zcr,
+    "pitch":       _analyze_pitch,
+    "snr":         _analyze_snr,
+    "mfcc":        _analyze_mfcc,
+    "crest":       _analyze_crest,
+    "entropy":     _analyze_entropy,
+    "spectrogram": _analyze_spectrogram,
+}
+
+
+def run_selected_analyses(audio_path, selected_keys, output_dir, on_item_done=None):
+    """
+    [Main Interface] 执行选定的音频分析项目。
+
+    Args:
+        audio_path:     WAV 文件路径
+        selected_keys:  选中的分析项 key 列表
+        output_dir:     图表输出目录
+        on_item_done:   可选回调 callback(key, result_dict)，每完成一项调用一次
+
+    Returns:
+        dict: {key: {"title", "path", "extra"} | {"title", "error"}}
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    samples, sr = _load_wav_as_array(audio_path)
+
+    results = {}
+    for key in selected_keys:
+        func = _ANALYSIS_FUNCS.get(key)
+        if not func:
+            result = {"title": ANALYSIS_ITEMS.get(key, key), "error": "未知分析项"}
+            results[key] = result
+            if on_item_done:
+                on_item_done(key, result)
+            continue
+
+        out_path = os.path.join(output_dir, f"analysis_{key}.png")
+        try:
+            extra = func(samples, sr, out_path)
+            result = {"title": ANALYSIS_ITEMS[key], "path": out_path, "extra": extra or {}}
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            result = {"title": ANALYSIS_ITEMS.get(key, key), "error": str(e)}
+
+        results[key] = result
+        if on_item_done:
+            on_item_done(key, result)
+
+    return results
