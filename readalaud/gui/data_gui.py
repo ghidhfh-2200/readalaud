@@ -731,29 +731,49 @@ def _on_single_analysis_done(self, key, result, placeholders):
 # ══════════════════════════════════════════════════════════
 
 def refresh_general_dashboard(self, force_refresh=False):
-    try:
-        # Fetch fresh analysis data
-        dashboard_data = audio_analasy.refresh_dashboard_data(self, force_refresh=force_refresh)
+    # Show loading state
+    if hasattr(self, "data_labels"):
+        for label in self.data_labels.values():
+             try:
+                 label.configure(text="加载中...")
+             except Exception:
+                 pass
 
+    def _worker():
+        try:
+            # Fetch fresh analysis data
+            dashboard_data = audio_analasy.refresh_dashboard_data(self, force_refresh=force_refresh)
+            
+            # Schedule UI update
+            if hasattr(self, "data_frame") and self.data_frame.winfo_exists():
+                self.data_frame.after(0, lambda: _update_dashboard_ui(self, dashboard_data))
+        except Exception as e:
+            print(f"Error refreshing dashboard: {e}")
+            traceback.print_exc()
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+def _update_dashboard_ui(self, dashboard_data):
+    try:
         # --- Update Basic Stats in General Tab ---
         if isinstance(dashboard_data, dict):
-            self.data_labels["朗读总天数"].config(text=str(dashboard_data.get('total_days', '--')))
-            self.data_labels["朗读总时长（秒）"].config(text=f"{dashboard_data.get('total', 0):.2f}")
-            self.data_labels["平均朗读时长"].config(text=f"{dashboard_data.get('average_daily', 0):.2f}")
-            self.data_labels["当前连续朗读天数"].config(text=str(dashboard_data.get('current_streak', '--')))
-            self.data_labels["历史最长天数"].config(text=str(dashboard_data.get('max_streak', '--')))
-            self.data_labels["平均效率"].config(text=str(dashboard_data.get('average_efficiency', '--')))
+            self.data_labels["朗读总天数"].configure(text=str(dashboard_data.get('total_days', '--')))
+            self.data_labels["朗读总时长（秒）"].configure(text=f"{dashboard_data.get('total', 0):.2f}")
+            self.data_labels["平均朗读时长"].configure(text=f"{dashboard_data.get('average_daily', 0):.2f}")
+            self.data_labels["当前连续朗读天数"].configure(text=str(dashboard_data.get('current_streak', '--')))
+            self.data_labels["历史最长天数"].configure(text=str(dashboard_data.get('max_streak', '--')))
+            self.data_labels["平均效率"].configure(text=str(dashboard_data.get('average_efficiency', '--')))
         else:
             print("Error: dashboard_data is not a dictionary.")
 
         # Update Records
         eff_date = dashboard_data.get('max_efficiency_date', '----/--/--')
         eff_val = dashboard_data.get('max_efficiency_val', 0.0)
-        self.data_labels["最高效率"].config(text=f"{eff_val:.0%} ({eff_date})")
+        self.data_labels["最高效率"].configure(text=f"{eff_val:.0%} ({eff_date})")
 
         dur_date = dashboard_data.get('max_duration_date', '----/--/--')
         dur_val = dashboard_data.get('max_duration_val', 0.0)
-        self.data_labels["最长时长"].config(text=f"{dur_val:.0f}s ({dur_date})")
+        self.data_labels["最长时长"].configure(text=f"{dur_val:.0f}s ({dur_date})")
 
         # --- Update Charts (Heatmap & Trend) ---
         heatmap_path = dashboard_data.get('heatmap_path')
@@ -774,5 +794,5 @@ def refresh_general_dashboard(self, force_refresh=False):
                 self.day_tree.insert("", tk.END, values=record)
 
     except Exception as e:
-        print(f"Error refreshing dashboard: {e}")
+        print(f"Error updating dashboard UI: {e}")
         traceback.print_exc()
