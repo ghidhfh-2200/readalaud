@@ -1,3 +1,4 @@
+import hashlib
 import json
 import base64
 import os
@@ -39,20 +40,27 @@ def _save_settings_except_tts(self, option):
             messagebox.showinfo(message="无法找到账户配置文件，已自动重置\n请清空data文件夹中的子文件夹\n重新注册账号！")
     elif option == "password":
         new_password = self.settings_password_value.get()
-        new_password = base64.b64encode(new_password.encode("utf-8")).decode("utf-8")
-        try:
-            with open("./data/acounts.json", "r") as f:
-                read_accounts = json.load(f)
-            read_accounts['passwords'][self.current_acount] = new_password
-            with open("./data/acounts.json", "w") as f:
-                json.dump(read_accounts,f)
-            messagebox.showinfo(message="密码修改成功!")
-        except FileNotFoundError:
-            with open("./data/acounts.json", "w") as f:
-                write_data = {"names": [], "passwords": {}}
-            messagebox.showinfo(message="无法找到账户配置文件，已自动重置\n请清空data文件夹中的子文件夹\n重新注册账号！")
-        except json.decoder.JSONDecodeError:
-            messagebox.showinfo(message="账户文件解析失败！")
+        # Check if the user actually entered a new password
+        # If it's the placeholder or empty, we might skip or handle carefully. 
+        # But here the logic seems to simply take whatever value.
+        # If I change the UI to show empty/placeholder, the user must re-enter password to change it.
+        if new_password: # Only update if not empty
+             new_password_hash = hashlib.sha256(new_password.encode("utf-8")).hexdigest()
+             try:
+                with open("./data/acounts.json", "r") as f:
+                    read_accounts = json.load(f)
+                read_accounts['passwords'][self.current_acount] = new_password_hash
+                with open("./data/acounts.json", "w") as f:
+                    json.dump(read_accounts,f)
+                messagebox.showinfo(message="密码修改成功!")
+             except FileNotFoundError:
+                with open("./data/acounts.json", "w") as f:
+                    write_data = {"names": [], "passwords": {}}
+                messagebox.showinfo(message="无法找到账户配置文件，已自动重置\n请清空data文件夹中的子文件夹\n重新注册账号！")
+             except json.decoder.JSONDecodeError:
+                messagebox.showinfo(message="账户文件解析失败！")
+        else:
+             messagebox.showwarning(message="密码不能为空!")
     elif option == "goal":
         new_goal = self.settings_goal_value.get() * 60
         try:
@@ -125,15 +133,13 @@ def _load_settings(self):
         read_settings = write_data
         messagebox.showinfo(message="无法找到您的设置文件，已将设置全部重置!")
     try:
-        with open("./data/acounts.json", "r") as f:
-            load_accounts = json.load(f)
         try:
-            get_password = base64.b64decode(load_accounts['passwords'][self.current_acount]).decode("utf-8")
-        except IndexError:
+            get_password = ""
+        except (KeyError, IndexError):
             with open("./data/acounts.json", "r") as f:
                 read_accounts = json.load(f)
             read_accounts['passwords'][self.current_acount] = ""
-            with open("./data/accounts.json", "w") as f:
+            with open("./data/acounts.json", "w") as f:
                 json.dump(read_accounts,f)
             get_password = ""
             messagebox.showinfo(message="无法找到你的密码！已自动重置为空!")

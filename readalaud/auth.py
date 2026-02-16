@@ -3,6 +3,7 @@ import base64
 import os
 import shutil
 from tkinter import messagebox
+import hashlib
 
 
 def bind_auth(instance):
@@ -49,7 +50,7 @@ def _login_and_sign_up(self):
         if_continue = messagebox.askyesno(title="注册新账号？", message="此操作将会注册新账号\n是否继续？")
         if if_continue == True:
             encode_acount = base64.b64encode(get_input_acount.encode("utf-8")).decode("utf-8")
-            encode_password = base64.b64encode(get_input_password.encode("utf-8")).decode("utf-8")
+            encode_password = hashlib.sha256(get_input_password.encode("utf-8")).hexdigest()
             read_json['names'].append(encode_acount)
             read_json['passwords'][encode_acount] = ""
             read_json['passwords'][encode_acount] = encode_password
@@ -74,9 +75,34 @@ def _login_and_sign_up(self):
     else:
         encode_input_acount = base64.b64encode(get_input_acount.encode("utf-8")).decode("utf-8")
         if encode_input_acount in read_names:
-            find_passwod = read_passwords[encode_input_acount]
-            decode_password = base64.b64decode(find_passwod).decode("utf-8")
-            if decode_password == get_input_password:
+            stored_password = read_passwords[encode_input_acount]
+            input_password_hash = hashlib.sha256(get_input_password.encode("utf-8")).hexdigest()
+            
+            is_valid = False
+            is_legacy = False
+
+            if stored_password == input_password_hash:
+                is_valid = True
+            else:
+                # Try legacy Base64 check
+                try:
+                    decode_password = base64.b64decode(stored_password).decode("utf-8")
+                    if decode_password == get_input_password:
+                        is_valid = True
+                        is_legacy = True
+                except Exception:
+                    pass
+
+            if is_valid:
+                # Upgrade legacy password to SHA256
+                if is_legacy:
+                    read_json['passwords'][encode_input_acount] = input_password_hash
+                    try:
+                        with open("./data/acounts.json", "w") as f:
+                            json.dump(read_json, f)
+                    except Exception as e:
+                        print(f"Failed to migrate password: {e}")
+
                 self.current_acount= encode_input_acount
                 self.if_logged_in = True
                 
@@ -114,7 +140,7 @@ def _login_and_sign_up(self):
             if_continue = messagebox.askyesno(title="注册新账号？", message="此操作将会注册新账号\n是否继续？")
             if if_continue == True:
                 encode_acount = base64.b64encode(get_input_acount.encode("utf-8")).decode("utf-8")
-                encode_password = base64.b64encode(get_input_password.encode("utf-8")).decode("utf-8")
+                encode_password = hashlib.sha256(get_input_password.encode("utf-8")).hexdigest()
                 read_json['names'].append(encode_acount)
                 read_json['passwords'][encode_acount] = ""
                 read_json['passwords'][encode_acount] = encode_password
