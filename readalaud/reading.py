@@ -419,6 +419,8 @@ def merge_wav(wav_list, output_file):
     for i in range(len(wav_list)):
         wav_list[i] = "./audio_chunks/" + wav_list[i]
     print(wav_list)
+    # Ensure the output directory exists before writing
+    os.makedirs(os.path.dirname(output_file), exist_ok=True)
     # 2. 读取并合并所有wav文件
     for file in wav_list:
         params, frames = read_wav(file)
