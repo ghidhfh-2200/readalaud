@@ -19,16 +19,16 @@ ReadAlaud 是一个旨在帮助用户建立和保持朗读习惯的跨平台应�
     git clone https://github.com/yourusername/ReadAlaud.git
     ```
 2.  进入项目目录：
-    `bash
+    ```bash
     cd ReadAlaud
-    ` 
+    ``` 
 3.  安装依赖：
-    建议使用虚拟环境（venv）：
-    `bash
+    建议使用虚拟环境（venv）
     # Windows
     ```bash
     python -m venv venv
     venv\Scripts\activate
+    pip install -r requirements.txt
     ```
     # macOS/Linux
     ```bash
@@ -36,6 +36,7 @@ ReadAlaud 是一个旨在帮助用户建立和保持朗读习惯的跨平台应�
     source venv/bin/activate
     pip install -r requirements.txt
     ```
+
 
 ## 使用说明 (Usage)
 
