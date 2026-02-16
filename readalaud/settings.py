@@ -208,6 +208,30 @@ def save_tts_settings(self, args):
                                  "volume": args[1][i][3],
                                  "voice": args[1][i][4],
                                  "source": args[1][i][5]}
+            
+            # Check for changes and delete cached audio files
+            try:
+                with open(f"./data/{self.current_acount}/tts_config.json", "r") as f:
+                    old_config = json.load(f)
+                
+                for i, new_val in write_list.items():
+                    str_i = str(i)
+                    if str_i in old_config:
+                        # Compare dictionaries
+                        if old_config[str_i] != new_val:
+                            # Content changed, delete cached file if exists
+                            # Try both .wav and .mp3 just in case, though user mentioned sample.wav
+                            for ext in [".wav", ".mp3"]:
+                                file_path = f"./data/{self.current_acount}/tts/{i}{ext}"
+                                if os.path.exists(file_path):
+                                    try:
+                                        os.remove(file_path)
+                                        print(f"Deleted outdated TTS file: {file_path}")
+                                    except Exception as e:
+                                        print(f"Error deleting file {file_path}: {e}")
+            except (FileNotFoundError, json.JSONDecodeError):
+                pass  # First run or corrupted file, no old config to compare
+
             try:
                 with open(f"./data/{self.current_acount}/tts_config.json", "w") as f:
                     json.dump(write_list, f)
