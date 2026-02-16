@@ -14,6 +14,7 @@ import time
 import csv
 import wave
 import shutil
+import urllib.request
 from . import tts
 
 def bind_reading_api(instance):
@@ -228,6 +229,21 @@ def start_reading(self):
                 self.roll_check_threading.start()
             else:
                 log(f"无法清除进程ID为 {get_port} 的服务器进程", self=self)
+        else:
+            # 服务器已在运行，直接打开网页
+            open_web = ctx.Process(target=start_webpage)
+            open_web.start()
+            # 如果轮询线程未运行，则启动轮询线程
+            if not (hasattr(self, 'roll_check_threading') and self.roll_check_threading.is_alive()):
+                self.if_reading = True
+                # 服务器已在运行但不是本次启动的，无法使用IPC队列，传入None使用HTTP轮询模式
+                self.roll_check_threading = threading.Thread(target=roll_check, args=(
+                                                                                    self.reading_state_label,
+                                                                                    None,
+                                                                                    self.information_label_list,
+                                                                                    self,))
+                self.roll_check_threading.daemon = True
+                self.roll_check_threading.start()
     else:
         # 服务器未运行，主进程直接启动服务器和网页，并用IPC队列
         self.if_reading = True
@@ -248,6 +264,15 @@ def WriteCountDbWrite(db_list, acount):
     get_date = datetime.datetime.now().strftime('%Y-%m-%d')
     write_db_data(acount=acount, db=db_list, date=get_date)
 
+def _poll_server_http(url="http://127.0.0.1:8008/poll", timeout=2):
+    """当IPC队列不可用时，通过HTTP轮询服务器的/poll端点获取最新状态。"""
+    try:
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return None
+
 def data_thread(ipc_queue, ui_queue, instance):
     write_count = 0
     db_list = []
@@ -261,12 +286,48 @@ def data_thread(ipc_queue, ui_queue, instance):
     current_pause_start = None
     last_ui_update_time = 0
     
+    # HTTP轮询模式状态（当ipc_queue为None时使用HTTP轮询代替IPC队列）
+    use_http_poll = (ipc_queue is None)
+    last_poll_broadcast = None
+    
+    if use_http_poll:
+        # 首次轮询：丢弃上一次会话残留的 end_sig 和旧 broadcast，
+        # 确保不会因为陈旧状态立刻触发结束流程
+        initial_poll = _poll_server_http()
+        if initial_poll and isinstance(initial_poll, dict):
+            # 记录当前广播内容作为基线，只有后续变化才会被处理
+            if "broadcast" in initial_poll:
+                last_poll_broadcast = initial_poll["broadcast"]
+            # end_sig 已被服务器的 /poll 端点消费（pop），无需额外处理
+        print("[data_thread] HTTP polling mode started, baseline state cleared.", flush=True)
+    
     while getattr(instance, 'if_reading', True):
         try:
-            try:
-                data = ipc_queue.get(timeout=1)
-            except Exception:
-                continue
+            data = None
+            if use_http_poll:
+                # HTTP轮询模式：服务器已在运行，通过HTTP获取最新状态
+                poll_result = _poll_server_http()
+                if poll_result is not None and isinstance(poll_result, dict):
+                    # 检查结束信号
+                    if "end_sig" in poll_result:
+                        data = {"end_sig": True}
+                    # 只处理有变化的广播数据（避免重复累计时间）
+                    if "broadcast" in poll_result:
+                        current_bc = poll_result["broadcast"]
+                        if current_bc != last_poll_broadcast:
+                            last_poll_broadcast = current_bc
+                            if data is None:
+                                data = {}
+                            data["broadcast"] = current_bc
+                if data is None:
+                    time.sleep(0.5)
+                    continue
+                time.sleep(0.3)
+            else:
+                try:
+                    data = ipc_queue.get(timeout=1)
+                except Exception:
+                    continue
                 
             if not data:
                 continue

@@ -64,7 +64,11 @@ def start_socket_server(queue=None):
     @fast_server.get("/poll")
     async def poll_state():
         try:
-            return last_state
+            result = dict(last_state)
+            # end_sig 只返回一次，读取后立即清除，避免后续轮询重复触发结束流程
+            if "end_sig" in last_state:
+                del last_state["end_sig"]
+            return result
         except Exception as e:
             print(e)
             return {"message": "err: " + str(e)}

@@ -59,14 +59,39 @@ def _generate_main_window(self):
 # ──────────────────────── 关闭确认 ────────────────────────
 
 def check_if_reading(self):
-    if self.if_reading == True:
-        messagebox.showinfo(title="无法关闭", message="当前正在朗读，请结束朗读后再关闭主窗口！")
-    else:
-        if_exit = messagebox.askyesno(title="确定要关闭吗？", message="确认要关闭吗?")
-        if if_exit == True:
-            self.main_window.destroy()
+    if self.if_reading:
+        # 双重检查：确认服务器确实还在运行
+        server_running = server_manager.check_if_server_running()
+        if server_running:
+            messagebox.showinfo(title="无法关闭", message="当前正在朗读，请结束朗读后再关闭主窗口！")
         else:
-            pass
+            # 服务器已经不在运行，重置朗读状态
+            self.if_reading = False
+            if_exit = messagebox.askyesno(title="确定要关闭吗？", message="朗读服务器已停止。确认要关闭吗?")
+            if if_exit:
+                self.main_window.destroy()
+    else:
+        # 检查服务器是否仍在后台运行
+        server_running = server_manager.check_if_server_running()
+        if server_running:
+            action = messagebox.askyesnocancel(
+                title="服务器仍在运行",
+                message="检测到朗读服务器仍在后台运行。\n\n是 - 关闭服务器并退出\n否 - 保留服务器并退出\n取消 - 返回"
+            )
+            if action is True:
+                # 关闭服务器并退出
+                pid = server_manager.server_pid()
+                if pid:
+                    server_manager.end_server_process(pid=pid, force=True)
+                self.main_window.destroy()
+            elif action is False:
+                # 保留服务器并退出
+                self.main_window.destroy()
+            # action is None (取消): 不做任何事
+        else:
+            if_exit = messagebox.askyesno(title="确定要关闭吗？", message="确认要关闭吗?")
+            if if_exit:
+                self.main_window.destroy()
 
 
 # ──────────────────────── 欢迎页 / 导航 ────────────────────────
