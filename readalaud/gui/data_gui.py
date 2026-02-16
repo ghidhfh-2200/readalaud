@@ -3,8 +3,9 @@
 """
 
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, filedialog
 import os
+import shutil
 import time
 import wave
 import traceback
@@ -121,9 +122,36 @@ def _load_and_display_image(path, parent_frame, width_hint=None):
         label = tk.Label(parent_frame, image=tk_img, bg="#2b2b2b")
         label.image = tk_img  # keep reference to avoid GC
         label.pack(fill="both", expand=True)
+
+        # Right-click menu for export
+        menu = tk.Menu(label, tearoff=0)
+        menu.add_command(label="导出图片", command=lambda: _export_image(path))
+
+        def show_menu(event):
+            menu.post(event.x_root, event.y_root)
+
+        label.bind("<Button-3>", show_menu)
+
     except Exception as e:
         print(f"Error loading image {path}: {e}")
         tk.Label(parent_frame, text=f"加载失败: {e}", bg="#2b2b2b", fg="red").pack()
+
+def _export_image(src_path):
+    """Export the image to a user-selected location."""
+    if not src_path or not os.path.exists(src_path):
+        return
+
+    try:
+        ext = os.path.splitext(src_path)[1]
+        dest_path = filedialog.asksaveasfilename(
+            defaultextension=ext,
+            filetypes=[("Image files", f"*{ext}"), ("All files", "*.*")],
+            title="导出图片"
+        )
+        if dest_path:
+            shutil.copy2(src_path, dest_path)
+    except Exception as e:
+        print(f"Error exporting image: {e}")
 
 
 # ══════════════════════════════════════════════════════════
@@ -711,6 +739,16 @@ def _on_single_analysis_done(self, key, result, placeholders):
             img_label = tk.Label(lf, image=tk_img)
             img_label.image = tk_img  # prevent GC
             img_label.pack(fill="x", expand=True)
+
+            # Right-click menu for export
+            menu = tk.Menu(img_label, tearoff=0)
+            menu.add_command(label="导出图片", command=lambda: _export_image(chart_path))
+
+            def show_menu(event):
+                menu.post(event.x_root, event.y_root)
+
+            img_label.bind("<Button-3>", show_menu)
+
         except Exception as e:
             tk.Label(
                 lf, text=f"图表加载失败: {e}", fg="#dc3545", font=("微软雅黑", 10),
