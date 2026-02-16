@@ -84,7 +84,7 @@
     let processTimer = null; // 新增：processAudio 定时器句柄
     let workerTimer = null;  // 新增：worker_data 定时器句柄
     const splDisplay = document.getElementById('spl_value');
-    let CALIBRATION_OFFSET_DB = 0;
+    let CALIBRATION_OFFSET_DB = 94;
     let if_paused = false;
 
     // WebSocket streaming
@@ -93,7 +93,7 @@
     let pcmBuffer = null; // Reusable PCM buffer
     let workerBlobURL = null; // Store for cleanup
     let worker = null;
-    
+
     // 设置Canvas尺寸为窗口大小
     function resizeCanvas() {
         canvas.width = window.innerWidth;
@@ -120,7 +120,7 @@
         audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
         analyser = audioContext.createAnalyser();
         analyser.fftSize = 512;
-        
+
         const bufferLength = analyser.frequencyBinCount;
         dataArray = new Uint8Array(bufferLength);
         if (!previousData || previousData.length !== bufferLength) {

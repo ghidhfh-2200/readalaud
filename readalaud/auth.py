@@ -64,7 +64,7 @@ def _login_and_sign_up(self):
             try:
                 os.makedirs(f"./data/{self.current_acount}", exist_ok=True)
                 with open(f"./data/{self.current_acount}/settings.json", "w") as f:
-                    write_data = {'goal':0, "stop-dur":0, "db-level":0, "calibration":0, "theme":"darkly", "if_tts": 0}
+                    write_data = {'goal':0, "stop-dur":0, "db-level":0, "calibration":94, "theme":"darkly", "if_tts": 0}
                     json.dump(write_data, f)
             except Exception as e:
                 print(e)
@@ -112,7 +112,7 @@ def _login_and_sign_up(self):
                     try:
                         os.makedirs(user_data_path)
                         with open(f"{user_data_path}/settings.json", "w") as f:
-                            write_data = {'goal':0, "stop-dur":0, "db-level":0, "calibration":0, "theme":"darkly", "if_tts": 0}
+                            write_data = {'goal':0, "stop-dur":0, "db-level":0, "calibration":94, "theme":"darkly", "if_tts": 0}
                             json.dump(write_data, f)
                     except Exception as e:
                         messagebox.showerror(message=f"无法创建用户数据文件夹: {e}")
@@ -124,7 +124,7 @@ def _login_and_sign_up(self):
                 except FileNotFoundError:
                      # Create settings.json if it is missing even if folder exists
                     with open(f"{user_data_path}/settings.json", "w") as f:
-                        write_data = {'goal':0, "stop-dur":0, "db-level":0, "calibration":0, "theme":"darkly", "if_tts": 0}
+                        write_data = {'goal':0, "stop-dur":0, "db-level":0, "calibration":94, "theme":"darkly", "if_tts": 0}
                         json.dump(write_data, f)
                     read_settings = write_data
                 
@@ -155,7 +155,7 @@ def _login_and_sign_up(self):
                     print(self.current_acount)
                     os.makedirs(f"./data/{self.current_acount}", exist_ok=True)
                     with open(f"./data/{self.current_acount}/settings.json", "w") as f:
-                        write_data = {'goal':0, "stop-dur":0, "db-level":0, "calibration":0, "theme":"darkly", "if_tts":0}
+                        write_data = {'goal':0, "stop-dur":0, "db-level":0, "calibration":94, "theme":"darkly", "if_tts":0}
                         json.dump(write_data, f)
                 except Exception as e:
                     messagebox.showerror(message="出错啦!无法创建文件夹！\n可能是因为文件夹已存在或权限问题！")
@@ -205,7 +205,7 @@ def _reset_account_data(self):
             # Recreate directory
             os.makedirs(f"./data/{self.current_acount}", exist_ok=True)
             with open(f"./data/{self.current_acount}/settings.json", "w") as f:
-                write_data = {'goal':0, "stop-dur":0, "db-level":0, "calibration":0, "theme":"darkly", "if_tts": 0}
+                write_data = {'goal':0, "stop-dur":0, "db-level":0, "calibration":94, "theme":"darkly", "if_tts": 0}
                 json.dump(write_data, f)
             
             self.current_acount = ""

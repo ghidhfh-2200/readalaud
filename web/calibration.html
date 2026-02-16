@@ -86,7 +86,7 @@
     let animationId;
     let isActive = false;
     let previousData = [];
-    let CALIBRATION = 0
+    let CALIBRATION = 94
     const splDisplay = document.getElementById('spl_value');
     function change_calibration() {CALIBRATION = document.getElementById('input-db').value}
     // 校准偏移：将 dBFS 转为近似的 dB SPL，需要实际测量后填写（单位：dB）
@@ -136,7 +136,42 @@
     }
     
     // Web Worker setup
-let worker = new Worker('.audio_processor_worker.js');
+const workerScript = `
+        // Store previous smoothed values in Q8.8 fixed-point (Uint16) to avoid Float32Array
+        // Memory per bin: prev 2 bytes + out 1 byte = 3 bytes/bin (very small)
+        let prevQ88 = null;   // Uint16Array
+        let outU8 = null;     // Uint8Array
+
+        // Weights in Q0.8: 0.3 ~= 77/256, 0.7 ~= 179/256
+        const A = 77;
+        const B = 179;
+
+        onmessage = (event) => {
+            const inU8 = event.data; // EXPECTED: Uint8Array
+            const n = inU8.length | 0;
+
+            if (!prevQ88 || prevQ88.length !== n) {
+                prevQ88 = new Uint16Array(n);
+                outU8 = new Uint8Array(n);
+            }
+
+            for (let i = 0; i < n; i++) {
+                const inQ88 = inU8[i] << 8; // convert input to Q8.8
+                const smQ88 = (inQ88 * A + prevQ88[i] * B) >> 8; // back to Q8.8
+                prevQ88[i] = smQ88;
+                outU8[i] = smQ88 >> 8; // back to 0..255
+            }
+
+            postMessage(outU8); // reused; avoids allocating a new array each frame
+        };
+    `;
+
+// Create a Blob URL for the worker
+const workerBlob = new Blob([workerScript], { type: 'application/javascript' });
+workerBlobURL = URL.createObjectURL(workerBlob);
+
+// Initialize the Web Worker using the Blob URL
+worker = new Worker(workerBlobURL);
 
 // Limit refresh rate to 30 FPS
 const FRAME_INTERVAL = 1000 / 35;
@@ -175,6 +210,13 @@ let current_db = 0
 // Modify startMic to send data to the worker
 async function startMic() {
     try {
+        const response = await fetch('../temp.json');
+        if (!response.ok) {
+            throw new Error('Failed to fetch temp.json');
+        }
+        const jsonData = await response.json();
+        console.log('Loaded JSON data:', jsonData);
+        CALIBRATION = jsonData['calibration']
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
 
         if (!audioContext) {

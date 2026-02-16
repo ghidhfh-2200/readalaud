@@ -7,8 +7,14 @@ import json
 def bind_calibration_api(instance):
     instance.start_calibration = lambda: start_calibration(instance)
 
-HTML_FILE = ".web/calibration.html"
+HTML_FILE = "web/calibration.html"
 def start_webview(queue, queue_state, current_acount):
+    with open(f"./data/{current_acount}/settings.json", "r") as f:
+        read_json = json.load(f)
+    get_calibration = read_json['calibration']
+    write_temp = {"calibration": get_calibration, "threshold": 0}
+    with open("./temp.json","w") as f:
+        json.dump(write_temp, f)
     abs_path = os.path.abspath(HTML_FILE)
     url = f"file://{abs_path}"
 
@@ -20,7 +26,7 @@ def start_webview(queue, queue_state, current_acount):
         height=600,
         js_api=Calibration_API(current_acount),
     )
-    webview.start(gui='tkinter', debug=True)
+    webview.start(gui='tkinter', debug=False)
 
 def start_calibration(self):
     ctx = get_context("spawn")
@@ -55,4 +61,7 @@ class Calibration_API:
         time.sleep(2)
         if webview.windows:
             webview.windows[0].destroy()
+        temp = {"calibration": 94, "threshold": 0}
+        with open("./temp.json", "w") as f:
+            json.dump(temp, f)
         return "closed"

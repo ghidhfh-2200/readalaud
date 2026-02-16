@@ -72,7 +72,7 @@ def _save_settings_except_tts(self, option):
             messagebox.showinfo(message="目标时间修改成功！")
         except FileNotFoundError:
             with open(f"./data/{self.current_acount}/settings.json", "w") as f:
-                write_data = {'goal':0, "stop-dur":0, "db-level":0, "calibration":0, "theme":"darkly", "if_tts":0}
+                write_data = {'goal':0, "stop-dur":0, "db-level":0, "calibration":94, "theme":"darkly", "if_tts":0}
                 json.dump(write_data, f)
             messagebox.showinfo(message="无法找到你的设置文件！\n已自动重置，请重新完成所有设置!")
         except json.decoder.JSONDecodeError:
@@ -88,7 +88,7 @@ def _save_settings_except_tts(self, option):
             messagebox.showinfo(message="停顿容忍间隔修改成功！")
         except FileNotFoundError:
             with open(f"./data/{self.current_acount}/settings.json", "w") as f:
-                write_data = {'goal':0, "stop-dur":0, "db-level":0, "calibration":0, "theme":"darkly", "if_tts":0}
+                write_data = {'goal':0, "stop-dur":0, "db-level":0, "calibration":94, "theme":"darkly", "if_tts":0}
                 json.dump(write_data, f)
             messagebox.showinfo(message="无法找到你的设置文件！\n已自动重置，请重新完成所有设置!")
         except json.decoder.JSONDecodeError:
@@ -107,7 +107,7 @@ def _save_settings_except_tts(self, option):
             messagebox.showinfo(message="声音阈值修改成功！")
         except FileNotFoundError:
             with open(f"./data/{self.current_acount}/settings.json", "w") as f:
-                write_data = {'goal':0, "stop-dur":0, "db-level":0, "calibration":0, "theme":"darkly", "if_tts":0}
+                write_data = {'goal':0, "stop-dur":0, "db-level":0, "calibration":94, "theme":"darkly", "if_tts":0}
                 json.dump(write_data, f)
             messagebox.showinfo(message="无法找到你的设置文件！\n已自动重置，请重新完成所有设置!")
         except json.decoder.JSONDecodeError:
@@ -124,11 +124,11 @@ def _load_settings(self):
             os.makedirs(f"./data/{current_account}")
             with open(f"./data/{self.current_acount}/settings.json", "w") as f:
                 f.write("")
-                write_data = {'goal':0, "stop-dur":0, "db-level":0, "calibration":0, "theme":"darkly", "if_tts":0}
+                write_data = {'goal':0, "stop-dur":0, "db-level":0, "calibration":94, "theme":"darkly", "if_tts":0}
                 json.dump(write_data, f)
         except FileExistsError:
             with open(f"./data/{self.current_acount}/settings.json", "w") as f:
-                write_data = {'goal':0, "stop-dur":0, "db-level":0, "calibration":0, "theme":"darkly", "if_tts":0}
+                write_data = {'goal':0, "stop-dur":0, "db-level":0, "calibration":94, "theme":"darkly", "if_tts":0}
                 json.dump(write_data, f)
         read_settings = write_data
         messagebox.showinfo(message="无法找到您的设置文件，已将设置全部重置!")
@@ -216,7 +216,7 @@ def save_tts_settings(self, args):
                     json.dump(write_list, f)
     except FileNotFoundError:
         with open(f"./data/{self.current_acount}/settings.json", "w") as f:
-            write_data = {'goal':0, "stop-dur":0, "db-level":0, "calibration":0, "theme":"darkly", "if_tts":0}
+            write_data = {'goal':0, "stop-dur":0, "db-level":0, "calibration":94, "theme":"darkly", "if_tts":0}
             json.dump(write_data, f)
         messagebox.showinfo(message="无法找到你的设置文件！\n已自动重置，请重新完成所有设置!")
     except json.decoder.JSONDecodeError:

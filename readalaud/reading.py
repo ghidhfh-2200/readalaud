@@ -79,7 +79,7 @@ def reading_data_get_and_check(self):
             os.mkdir(f"./data/{self.current_acount}/{'-'.join(get_date.split('-')[0:2])}")
         except Exception:
             pass
-        write_data = {'goal':0, "stop-dur":0, "db-level":0, "calibration":0, "theme":"darkly", "if_tts":0}
+        write_data = {'goal':0, "stop-dur":0, "db-level":0, "calibration":94, "theme":"darkly", "if_tts":0}
         with open(f"./data/{self.current_acount}/settings.json", "w", encoding="utf-8") as f:
             json.dump(write_data, f)
         log("无法读取配置文件，已自动重置", self)
