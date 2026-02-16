@@ -268,7 +268,6 @@ def _calculate_streaks_logic(daily_dates):
     return current_streak, max_streak
 
 def _save_heatmap(df, save_path):
-    try:
         # Data Prep
         if df is None or df.empty:
             return False
@@ -286,26 +285,31 @@ def _save_heatmap(df, save_path):
             
         current_year = datetime.now().year
         target_year = current_year if current_year in years else years.max()
-        data = df_plot['duration'] / 60.0 # Minutes
+        
+        # Ensure data is a proper Series with DatetimeIndex.
+        # Reindex to full year range so calmap never gets a single-element
+        # Series that pandas would collapse to a scalar on year-string indexing.
+        data = pd.Series(df_plot['duration'].values / 60.0, index=df_plot.index)
+        full_year_idx = pd.date_range(start=f"{target_year}-01-01",
+                                       end=f"{target_year}-12-31", freq='D')
+        data = data.reindex(full_year_idx, fill_value=0)
+        data.index.name = 'date'
 
         # Plotting
         # Use a non-interactive backend for file generation if needed, 
         # but here we just create a figure and save.
         fig = plt.figure(figsize=(10, 3), dpi=100) 
         ax = fig.add_subplot(111)
-        
         calmap.yearplot(data, year=target_year, ax=ax, cmap='YlGn', 
                         linewidth=1, fillcolor='#dddddd', linecolor='#ffffff')
         ax.set_title(f"{target_year}年 朗读热力图 (颜色深浅表示时长)", 
                      fontproperties="Microsoft YaHei", fontsize=10)
         
         plt.tight_layout()
+        
         fig.savefig(save_path, bbox_inches='tight', dpi=100)
         plt.close(fig)
         return True
-    except Exception as e:
-        print(f"Error saving heatmap: {e}")
-        return False
 
 def _save_trend_chart(df, save_path):
     try:
