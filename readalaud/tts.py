@@ -96,14 +96,12 @@ def _play_web_tts_thread(text, volume, speed, voice_name, on_finish=None):
     os.close(fd)
 
     # build command line as list
-    cmd = ["edge-tts", "-t", str(text), "--write-media", path, f"--rate {rate_str}", f"--volume {vol_str}"]
-    print(cmd)
-    cmd = " ".join(cmd)
+    cmd = ["edge-tts", "-t", str(text), "--write-media", path, "--rate", rate_str, "--volume", vol_str]
     print(cmd)
     proc = None
     try:
         # run the edge-tts CLI (timeout to avoid hanging indefinitely)
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)  # 移除了shell=True
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     except subprocess.TimeoutExpired:
         print("edge-tts command timed out")
         proc = None
