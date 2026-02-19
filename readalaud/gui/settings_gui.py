@@ -33,22 +33,11 @@ def _generate_settings_gui(self):
     notebook = ttk.Notebook(master=self.settings_frame)
     account_frame = tk.Frame(notebook)
     read_frame = tk.Frame(notebook)
-    questions_and_answers_frame = tk.Frame(notebook)
     customize_frame = tk.Frame(notebook)
     notebook.add(child=read_frame, text="朗读设置")
-    notebook.add(child=questions_and_answers_frame, text="疑难解答")
     notebook.add(child=account_frame, text="账号与安全")
     notebook.add(child=customize_frame, text="个性化")
     notebook.pack(fill="both", expand=1)
-
-    # ── Q&A frame ──
-    markdown_text = markdown("""
-### 语音提示说明
-- 当前仅支持本地 TTS（pyttsx3）
-- 无需下载模型、无网络依赖
-""")
-    why_dbFS_label = HTMLLabel(master=questions_and_answers_frame, html=markdown_text)
-    why_dbFS_label.pack(fill="x", padx=5, pady=5)
 
     # ── account frame ──
     _build_account_tab(self, account_frame)
@@ -94,7 +83,7 @@ def _build_account_tab(self, account_frame):
     self.account_password_label = tk.Label(master=password_lf, text="密码设置：", font=("微软雅黑", 17))
     self.account_password_label.pack(side=tk.LEFT)
     self.settings_password_value = tk.StringVar()
-    password_entry = tk.Entry(master=password_lf, width=30, textvariable=self.settings_password_value, font=("微软雅黑", 17))
+    password_entry = tk.Entry(master=password_lf, width=30, textvariable=self.settings_password_value, font=("微软雅黑", 17),show="*")
     password_entry.pack(side=tk.LEFT)
     account_password_ok_button = tk.Button(
         master=password_lf, text="确定", font=self.mainpage_button_font, width=10,

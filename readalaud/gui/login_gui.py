@@ -52,7 +52,7 @@ def _generate_login_gui(self):
     )
     self.login_enter_password_label.pack(side=tk.LEFT)
     self.login_enter_password_entry = tk.Entry(
-        master=enter_password, width=30, font=("微软雅黑", 14), textvariable=self.login_password_enter
+        master=enter_password, width=30, font=("微软雅黑", 14), textvariable=self.login_password_enter,show="*"
     )
     self.login_enter_password_entry.pack(side=tk.RIGHT)
 
