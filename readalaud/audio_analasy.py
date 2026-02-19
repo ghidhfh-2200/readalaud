@@ -214,7 +214,7 @@ def total_time_calculate(self):
     except (FileNotFoundError, json.JSONDecodeError):
         with open(general_path, "w") as f:
             json.dump({"total": total_val, "last_cal_time": None}, f)
-    return sum
+    return total_val
 
 def _calculate_streaks_logic(daily_dates):
     """
