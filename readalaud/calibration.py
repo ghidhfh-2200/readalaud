@@ -3,11 +3,15 @@ import os
 from multiprocessing import Process, Queue, get_context
 import time
 import json
+import pathlib
 
 def bind_calibration_api(instance):
     instance.start_calibration = lambda: start_calibration(instance)
 
-HTML_FILE = "web/calibration.html"
+abs_path = pathlib.Path(__file__).resolve()
+parent_path = abs_path.parent.parent
+HTML_FILE = str(parent_path / "web" / "calibration.html")
+
 def start_webview(queue, queue_state, current_acount):
     with open(f"./data/{current_acount}/settings.json", "r") as f:
         read_json = json.load(f)
