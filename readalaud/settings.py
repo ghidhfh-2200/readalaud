@@ -133,16 +133,7 @@ def _load_settings(self):
         read_settings = write_data
         messagebox.showinfo(message="无法找到您的设置文件，已将设置全部重置!")
     try:
-        try:
-            get_password = ""
-        except (KeyError, IndexError):
-            with open("./data/acounts.json", "r") as f:
-                read_accounts = json.load(f)
-            read_accounts['passwords'][self.current_acount] = ""
-            with open("./data/acounts.json", "w") as f:
-                json.dump(read_accounts,f)
-            get_password = ""
-            messagebox.showinfo(message="无法找到你的密码！已自动重置为空!")
+        get_password = ""
     except FileNotFoundError:
         with open("./data/acounts.json", "w") as f:
             write_data = {"names": [], "passwords": {}}
