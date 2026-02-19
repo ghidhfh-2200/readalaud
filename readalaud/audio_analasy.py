@@ -12,6 +12,8 @@ from matplotlib.figure import Figure
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib import cm as _mpl_cm
 
+matplotlib.use("Agg")
+
 def bind_audio_analasy_api(instance):
     instance.stop_day_audio = lambda reset=False: stop_day_audio(instance, reset)
     instance.play_day_audio = lambda: play_day_audio(instance)
@@ -267,49 +269,50 @@ def _calculate_streaks_logic(daily_dates):
 
     return current_streak, max_streak
 
-def _save_heatmap(df, save_path):
-        # Data Prep
-        if df is None or df.empty:
-            return False
-            
-        df_plot = df.copy()
-        if not isinstance(df_plot.index, pd.DatetimeIndex):
-            if 'date' in df_plot.columns:
-                df_plot.index = pd.to_datetime(df_plot['date'])
-            else:
-                return False
-                
-        years = df_plot.index.year.unique()
-        if len(years) == 0:
-            return False
-            
-        current_year = datetime.now().year
-        target_year = current_year if current_year in years else years.max()
-        
-        # Ensure data is a proper Series with DatetimeIndex.
-        # Reindex to full year range so calmap never gets a single-element
-        # Series that pandas would collapse to a scalar on year-string indexing.
-        data = pd.Series(df_plot['duration'].values / 60.0, index=df_plot.index)
-        full_year_idx = pd.date_range(start=f"{target_year}-01-01",
-                                       end=f"{target_year}-12-31", freq='D')
-        data = data.reindex(full_year_idx, fill_value=0)
-        data.index.name = 'date'
+def _save_heatmap(df, save_dir):
+    """为每个有数据的年份（含当前年）生成独立热力图，返回 {year: path} 字典。"""
+    if df is None or df.empty:
+        return {}
 
-        # Plotting
-        # Use a non-interactive backend for file generation if needed, 
-        # but here we just create a figure and save.
-        fig = plt.figure(figsize=(10, 3), dpi=100) 
+    df_plot = df.copy()
+    if not isinstance(df_plot.index, pd.DatetimeIndex):
+        if 'date' in df_plot.columns:
+            df_plot.index = pd.to_datetime(df_plot['date'])
+        else:
+            return {}
+
+    years = set(df_plot.index.year.unique())
+    if not years:
+        return {}
+
+    # 始终包含当前年份，即使当年还没有数据也显示空白热力图
+    current_year = datetime.now().year
+    years.add(current_year)
+    years = sorted(years)
+
+    data = pd.Series(df_plot['duration'].values / 60.0, index=df_plot.index)
+
+    heatmap_paths = {}
+    for year in years:
+        save_path = os.path.join(save_dir, f"heatmap_{year}.png")
+        full_year_idx = pd.date_range(start=f"{year}-01-01",
+                                       end=f"{year}-12-31", freq='D')
+        year_data = data.reindex(full_year_idx, fill_value=0)
+        year_data.index.name = 'date'
+
+        fig = plt.figure(figsize=(10, 3), dpi=100)
         ax = fig.add_subplot(111)
-        calmap.yearplot(data, year=target_year, ax=ax, cmap='YlGn', 
+        calmap.yearplot(year_data, year=year, ax=ax, cmap='YlGn',
                         linewidth=1, fillcolor='#dddddd', linecolor='#ffffff')
-        ax.set_title(f"{target_year}年 朗读热力图 (颜色深浅表示时长)", 
+        ax.set_title(f"{year}年 朗读热力图 (颜色深浅表示时长)",
                      fontproperties="Microsoft YaHei", fontsize=10)
-        
+
         plt.tight_layout()
-        
         fig.savefig(save_path, bbox_inches='tight', dpi=100)
         plt.close(fig)
-        return True
+        heatmap_paths[year] = save_path
+
+    return heatmap_paths
 
 def _save_trend_chart(df, save_path):
     try:
@@ -380,7 +383,6 @@ def refresh_dashboard_data(self, force_refresh=False):
     # 定义路径
     details_dir = f"./details/{account}"
     general_path = os.path.join(details_dir, "general.json")
-    heatmap_path = os.path.join(details_dir, "heatmap.png")
     trend_path = os.path.join(details_dir, "trend.png")
     os.makedirs(details_dir, exist_ok=True)
     
@@ -393,11 +395,12 @@ def refresh_dashboard_data(self, force_refresh=False):
                 cached_data = json.load(f)
                 last_time = cached_data.get("last_cal_time")
                 
-                # Check for validity: < 120s AND images exist
-                if (last_time and (current_ts - last_time < 120) and 
-                    os.path.exists(heatmap_path) and os.path.exists(trend_path)):
+                # Check for validity: < 120s AND charts exist
+                cached_hm = cached_data.get("heatmap_paths", {})
+                has_heatmaps = any(os.path.exists(p) for p in cached_hm.values())
+                if (last_time and (current_ts - last_time < 120) and
+                    has_heatmaps and os.path.exists(trend_path)):
                     print("Load cached dashboard data & charts.")
-                    cached_data['heatmap_path'] = heatmap_path
                     cached_data['trend_path'] = trend_path
                     return cached_data
         except (json.JSONDecodeError, OSError):
@@ -472,7 +475,7 @@ def refresh_dashboard_data(self, force_refresh=False):
         plot_df = pd.DataFrame(columns=['date', 'duration', 'efficiency'])
 
     # --- 3. 生成并保存图表 (Save Charts) ---
-    _save_heatmap(plot_df, heatmap_path)
+    heatmap_results = _save_heatmap(plot_df, details_dir)
     _save_trend_chart(plot_df, trend_path)
 
     # 构建结果字典
@@ -488,8 +491,8 @@ def refresh_dashboard_data(self, force_refresh=False):
         "max_duration_val": max_duration_val,
         "max_duration_date": max_duration_date,
         "daily_records": sorted(daily_records, key=lambda x: x[0], reverse=True),
-        # "plot_df": plot_df, # Dataframe NOT returned to GUI anymore for drawing
-        "heatmap_path": heatmap_path,
+        "heatmap_years": sorted(heatmap_results.keys()),
+        "heatmap_paths": {str(k): v for k, v in heatmap_results.items()},
         "trend_path": trend_path,
         "last_cal_time": current_ts     # 本次计算时间戳
     }
@@ -708,6 +711,255 @@ ANALYSIS_ITEMS = {
     "spectrogram": "语谱图 (Spectrogram)",
 }
 
+# ──────────────────────────────────────────────────────────
+#  各指标通俗说明（面向普通用户）
+#
+#  每项格式：
+#    "title"  —— 标题（同 ANALYSIS_ITEMS）
+#    "brief"  —— 一句话简介，显示在图表标题下方
+#    "detail" —— 详细说明，解释图表含义及如何判断好坏
+#    "extra_tips" —— 额外解读提示（Extra 数据字段的含义）
+# ──────────────────────────────────────────────────────────
+ANALYSIS_DESCRIPTIONS: dict[str, dict] = {
+
+    # ─── VAD ───────────────────────────────────────────────
+    "vad": {
+        "title":  "语音活动检测 (VAD)",
+        "brief":  "检测录音中哪些时刻在说话、哪些是停顿或噪音。",
+        "detail": (
+            "图表横轴为时间，绿色填充区域代表检测到的「语音段」，"
+            "蓝色折线为归一化能量变化。\n"
+            "\n"
+            "📌 如何判断朗读质量：\n"
+            "  • 语音占比偏低（< 50%）：停顿过多，可能朗读不够流畅，或录音中有较长的空白段。\n"
+            "  • 语音占比偏高（> 90%）：几乎全程在说话，连贯度良好，但要注意是否缺少必要的断句停顿。\n"
+            "  • 理想范围：60%–85%。适度的停顿有助于听众理解，也体现了良好的断句节奏。\n"
+            "\n"
+            "💡 提示：如果图中语音段不连续、频繁中断，建议检查是否存在口误、卡顿或录音噪音触发了误判。"
+        ),
+        "extra_tips": {
+            "语音占比": "实际说话时长 ÷ 总录音时长。越高说明停顿越少、朗读越连贯。",
+        },
+    },
+
+    # ─── RMS ───────────────────────────────────────────────
+    "rms": {
+        "title":  "短时能量 (RMS)",
+        "brief":  "衡量录音音量（响度）随时间的变化趋势。",
+        "detail": (
+            "RMS（均方根）反映的是声音的「平均响度」。图中橙色折线越高，说明那一时刻的声音越响亮。\n"
+            "\n"
+            "📌 如何判断朗读质量：\n"
+            "  • 曲线平稳：音量控制良好，前后段响度均衡。\n"
+            "  • 曲线起伏剧烈：音量忽大忽小，可能存在突然大喊或声音衰弱的问题。\n"
+            "  • 曲线整体偏低：录音音量不足，建议靠近麦克风或调高录音增益。\n"
+            "  • 曲线末段下降明显：朗读后期疲劳，气息支撑不足。\n"
+            "\n"
+            "💡 提示：朗读全程 RMS 均值建议保持在 0.05–0.3 之间（已归一化）。"
+        ),
+        "extra_tips": {
+            "均值RMS": "整段录音的平均响度。值越大说明整体音量越响亮。",
+            "最大RMS": "录音中出现的最大瞬时响度，可用于判断是否有爆音。",
+        },
+    },
+
+    # ─── LTAS ──────────────────────────────────────────────
+    "ltas": {
+        "title":  "长时平均能量谱 (LTAS)",
+        "brief":  "将录音按每10秒分段，对比各段的频率分布是否一致。",
+        "detail": (
+            "LTAS（Long-Term Average Spectrum）将录音切分为若干 10 秒的片段，"
+            "每条彩色曲线代表一个片段的能量在各频率上的分布。\n"
+            "\n"
+            "📌 如何判断朗读质量：\n"
+            "  • 各条曲线高度重合：音色稳定，前后发音风格一致，是优质朗读的标志。\n"
+            "  • 曲线明显分离：说明不同时间段音色差异较大，可能存在声音疲劳或情绪起伏过大。\n"
+            "  • 低频能量（< 500 Hz）远高于高频：低音浑浊，可能麦克风放置过近或有噪音干扰。\n"
+            "  • 高频段（> 4000 Hz）完全平坦：高频细节缺失，录音设备或环境可能存在高频截止。\n"
+            "\n"
+            "💡 提示：正常人声主要能量集中在 300–3400 Hz，图中该区域应有明显的能量隆起。"
+        ),
+        "extra_tips": {
+            "切片数": "录音被均分为多少个 10 秒片段，片段越多说明录音时长越长。",
+        },
+    },
+
+    # ─── ZCR ───────────────────────────────────────────────
+    "zcr": {
+        "title":  "过零率变化 (ZCR)",
+        "brief":  "反映朗读中清辅音（如 s、sh、z）与元音的分布比例。",
+        "detail": (
+            "过零率（Zero Crossing Rate）表示信号每帧内穿越零点的次数比例。"
+            "高过零率区域通常对应清辅音（摩擦音如 s/sh/f），低过零率对应元音（a/o/e）。\n"
+            "\n"
+            "📌 如何判断朗读质量：\n"
+            "  • ZCR 曲线均匀波动：说话节奏自然，元音辅音分布合理。\n"
+            "  • ZCR 长时间偏低：可能以元音为主，语音较为流畅但辅音清晰度有待提升。\n"
+            "  • ZCR 出现密集的尖峰：对应清辅音密集段，发音清晰有力。\n"
+            "  • 静默段 ZCR 偏高：可能存在高频背景噪音（如风扇声、电流声）。\n"
+            "\n"
+            "💡 提示：ZCR 本身不直接反映朗读好坏，主要用于辅助判断噪音和发音清晰度。"
+        ),
+        "extra_tips": {
+            "平均ZCR": "全程的平均过零率。正常人声一般在 0.05–0.20 之间。",
+        },
+    },
+
+    # ─── Pitch / F0 ────────────────────────────────────────
+    "pitch": {
+        "title":  "基频变化 (F0)",
+        "brief":  "记录朗读时声调（音调高低）的变化，反映抑扬顿挫程度。",
+        "detail": (
+            "基频（Fundamental Frequency，F0）即声带振动的频率，决定了音调的高低。"
+            "图中每个点代表检测到的瞬时音调，空白处为静默或声音太弱无法检测。\n"
+            "\n"
+            "📌 参考范围：\n"
+            "  • 成年男性：80–180 Hz（平均约 120 Hz）\n"
+            "  • 成年女性：160–300 Hz（平均约 220 Hz）\n"
+            "  • 儿童：250–400 Hz\n"
+            "\n"
+            "📌 如何判断朗读质量：\n"
+            "  • F0 曲线起伏丰富：朗读有抑扬顿挫，情感表达自然，听感生动。\n"
+            "  • F0 曲线几乎水平（单调）：语调平淡，缺乏感情，听感枯燥。\n"
+            "  • F0 频繁跳变到极高或极低：可能有破音、嗓音不稳或检测误差。\n"
+            "  • 句末 F0 下降：符合普通话陈述句语调规律，是正确断句的标志。\n"
+            "\n"
+            "💡 提示：F0 的变化幅度（音域跨度）越大，朗读的感染力通常越强。"
+        ),
+        "extra_tips": {
+            "平均F0": "全程有声段的平均音调。可用于粗略判断说话者的音域中心。",
+        },
+    },
+
+    # ─── SNR ───────────────────────────────────────────────
+    "snr": {
+        "title":  "信噪比 (SNR)",
+        "brief":  "量化录音中人声与背景噪音的比例，数值越高录音越干净。",
+        "detail": (
+            "信噪比（Signal-to-Noise Ratio）以 dB（分贝）为单位，"
+            "正值表示信号比噪音强，负值表示噪音掩盖了信号。"
+            "图中蓝色折线为逐帧 SNR，红色虚线为全局平均 SNR。\n"
+            "\n"
+            "📌 评分参考：\n"
+            "  • ≥ 30 dB：优秀，录音非常干净，专业播音水准。\n"
+            "  • 20–30 dB：良好，日常朗读的正常水平。\n"
+            "  • 10–20 dB：一般，背景噪音有些明显，建议改善录音环境。\n"
+            "  •  < 10 dB：较差，噪音严重，严重影响收听体验。\n"
+            "\n"
+            "📌 如何判断朗读质量：\n"
+            "  • SNR 曲线平稳且偏高：录音环境安静，全程音质一致。\n"
+            "  • SNR 在语音段高、静默段低：属于正常现象，说明检测准确。\n"
+            "  • SNR 全程偏低：录音环境嘈杂，建议关闭窗户、远离噪音源，或使用降噪麦克风。\n"
+            "\n"
+            "💡 提示：本工具使用「最低 10% 能量帧」估算噪底，适合稳态噪音场景。"
+        ),
+        "extra_tips": {
+            "全局SNR": "全段录音的综合信噪比。这是评估录音环境质量最直接的单一指标。",
+        },
+    },
+
+    # ─── MFCC ──────────────────────────────────────────────
+    "mfcc": {
+        "title":  "梅尔倒谱系数 (MFCC)",
+        "brief":  "模拟人耳感知，提取发音音色特征，是语音识别最核心的特征。",
+        "detail": (
+            "MFCC（Mel-Frequency Cepstral Coefficients）通过模拟人耳对频率的非线性感知，"
+            "将声音压缩为 13 个特征系数的时序矩阵（颜色图）。\n"
+            "\n"
+            "📌 图表解读：\n"
+            "  • 横轴：时间进度；纵轴：MFCC 系数编号（0–12）\n"
+            "  • 颜色：暖色（红）= 正值（能量集中），冷色（蓝）= 负值（能量分散）\n"
+            "  • 第 0 行（MFCC₀）：主要反映整体能量，类似 RMS。\n"
+            "  • 第 1–3 行：反映声音的粗粒度音色（声道共鸣特征）。\n"
+            "  • 第 4–12 行：反映细粒度的音色变化（发音方式的细节）。\n"
+            "\n"
+            "📌 如何判断朗读质量：\n"
+            "  • 颜色块分布均匀、过渡平滑：发音稳定，音色一致。\n"
+            "  • 局部出现突变的颜色块：对应特定时刻音色的突变，可能是口误、破音或情绪切换。\n"
+            "  • 整体颜色偏蓝（数值偏低）：能量不足，说话声音较弱。\n"
+            "\n"
+            "💡 提示：MFCC 对普通用户较为专业，重点关注整体颜色是否均匀，有无明显异常区域即可。"
+        ),
+        "extra_tips": {},
+    },
+
+    # ─── Crest Factor ──────────────────────────────────────
+    "crest": {
+        "title":  "峰值因子 (Crest Factor)",
+        "brief":  "衡量声音的动态范围，反映朗读是否有爆破音或声音过于压缩。",
+        "detail": (
+            "峰值因子 = 瞬时峰值 ÷ RMS 均方根（以 dB 表示）。"
+            "它描述了声音中「瞬间最大值」相对于「平均值」的比例，反映音频的动态特性。\n"
+            "\n"
+            "📌 评分参考：\n"
+            "  • 10–20 dB：正常人声的典型范围，动态自然。\n"
+            "  •  > 25 dB：存在明显的爆破音（爆破辅音 p/b/t/d 用力过猛）或突发噪音。\n"
+            "  •  < 6 dB：动态范围极小，声音过于「压缩」，可能听感沉闷、缺乏活力。\n"
+            "\n"
+            "📌 如何判断朗读质量：\n"
+            "  • 曲线平稳在 10–20 dB：发音力度均匀，没有爆破。\n"
+            "  • 出现尖峰（> 25 dB）：对应特定时刻的爆破音或破音，建议注意「爆破辅音」的气流控制。\n"
+            "  • 整体偏低（< 8 dB）：朗读缺乏轻重缓急，建议加强重音与停顿的对比。\n"
+            "\n"
+            "💡 提示：专业播音中常用防喷罩和压限器来控制峰值因子，保持在合理范围。"
+        ),
+        "extra_tips": {
+            "平均峰值因子": "全段平均动态范围。正常朗读建议保持在 10–20 dB。",
+        },
+    },
+
+    # ─── Spectral Entropy ──────────────────────────────────
+    "entropy": {
+        "title":  "频谱熵 (Spectral Entropy)",
+        "brief":  "衡量频谱能量的「混乱程度」，可用于区分清晰语音与噪音。",
+        "detail": (
+            "频谱熵（Spectral Entropy）描述频谱能量分布的随机程度（已归一化到 0–1）。\n"
+            "  • 接近 0：能量高度集中在少数频率（如纯音调、清晰元音）\n"
+            "  • 接近 1：能量均匀分散在所有频率（如白噪声、摩擦辅音）\n"
+            "\n"
+            "📌 如何判断朗读质量：\n"
+            "  • 语音段熵值约 0.5–0.8：属于正常人声范围，频谱结构清晰。\n"
+            "  • 语音段熵值持续 > 0.9：语音接近噪音，可能发音含混、漏气声过多，或存在背景噪音。\n"
+            "  • 静默段熵值 > 0.85：背景噪音较为均匀（如风声、电流声），应改善录音环境。\n"
+            "  • 句尾辅音段熵值升高：属正常现象（辅音频谱本就较为分散）。\n"
+            "\n"
+            "💡 提示：频谱熵结合 SNR 使用效果更佳——SNR 低而熵值高，通常是背景噪音问题；"
+            "SNR 正常而熵值高，可能是发音清晰度问题。"
+        ),
+        "extra_tips": {
+            "平均熵": "全程平均频谱熵（0–1）。理想朗读的有声段均值一般在 0.5–0.75。",
+        },
+    },
+
+    # ─── Spectrogram ───────────────────────────────────────
+    "spectrogram": {
+        "title":  "语谱图 (Spectrogram)",
+        "brief":  "最直观的语音可视化：同时展示时间、频率、能量三维信息。",
+        "detail": (
+            "语谱图以「时间×频率」二维颜色图的形式展示录音的全部频率信息。\n"
+            "  • 横轴：时间（秒）\n"
+            "  • 纵轴：频率（Hz），0 在下方，高频在上方\n"
+            "  • 颜色：越亮（橙/白）表示该时刻该频率的能量越强，越暗（黑）表示能量越弱\n"
+            "\n"
+            "📌 图中常见特征解读：\n"
+            "  • 水平亮纹（宽带横条）：元音（a/o/e 等），能量集中且持续。\n"
+            "  • 竖向亮纹（瞬态竖条）：爆破辅音（b/p/d/t/g/k），能量短暂且宽频。\n"
+            "  • 高频斜纹（斜向条纹）：摩擦辅音（s/sh/f/h），能量分布在高频段。\n"
+            "  • 全频短暂空白：停顿或换气。\n"
+            "  • 低频持续亮带（< 300 Hz）：房间低频噪音或麦克风震动干扰。\n"
+            "\n"
+            "📌 如何判断朗读质量：\n"
+            "  • 元音段颜色饱和、纹路清晰：发音饱满，共鸣良好。\n"
+            "  • 辅音段可见清晰的宽频竖纹：爆破音清晰有力。\n"
+            "  • 高频段（> 4000 Hz）一片漆黑：高频泛音不足，声音可能偏沉闷，缺乏亮度。\n"
+            "  • 低频段始终有明显噪声带：环境噪声较大，建议降噪处理。\n"
+            "\n"
+            "💡 提示：语谱图信息最为丰富，建议配合其他指标综合分析。"
+        ),
+        "extra_tips": {},
+    },
+}
+
 
 # ─── 工具函数 ───
 
@@ -757,7 +1009,22 @@ def _frame_signal(samples, frame_len, hop_len):
 # ─── 各项分析实现 ───
 
 def _analyze_vad(samples, sr, output_path):
-    """VAD：基于短时能量的语音活动检测。"""
+    """
+    语音活动检测 (VAD — Voice Activity Detection)
+    ─────────────────────────────────────────────
+    算法：基于短时能量阈值法。
+      1. 将音频切分为 25ms 帧（步长 10ms）
+      2. 计算每帧的短时能量
+      3. 以全局平均能量的 10% 作为语音/静默分界阈值
+      4. 能量高于阈值的帧标记为「语音段」
+
+    输出指标：
+      - 语音占比：有效语音帧数 / 总帧数，越高说明朗读越连贯
+
+    图表说明：
+      - 绿色填充区域 = 检测到的语音段
+      - 蓝色折线 = 归一化能量曲线
+    """
     frame_len = int(0.025 * sr)
     hop_len = int(0.010 * sr)
     frames = _frame_signal(samples, frame_len, hop_len)
@@ -785,7 +1052,20 @@ def _analyze_vad(samples, sr, output_path):
 
 
 def _analyze_rms(samples, sr, output_path):
-    """短时 RMS 能量。"""
+    """
+    短时能量 (RMS — Root Mean Square)
+    ────────────────────────────────────
+    算法：将音频切分为 25ms 帧（步长 10ms），对每帧计算均方根值。
+      RMS = sqrt( mean(x²) )，其中 x 为帧内采样点
+
+    输出指标：
+      - 均值RMS：全程平均响度，反映整体音量水平
+      - 最大RMS：峰值响度，用于检测是否有爆音
+
+    图表说明：
+      - 橙色折线 = RMS 随时间变化（已归一化到 0–1）
+      - 曲线越平稳说明音量控制越好
+    """
     frame_len = int(0.025 * sr)
     hop_len = int(0.010 * sr)
     frames = _frame_signal(samples, frame_len, hop_len)
@@ -805,7 +1085,23 @@ def _analyze_rms(samples, sr, output_path):
 
 
 def _analyze_ltas(samples, sr, output_path):
-    """长时平均能量谱 (LTAS)，每 10 秒切片一次。"""
+    """
+    长时平均能量谱 (LTAS — Long-Term Average Spectrum)
+    ─────────────────────────────────────────────────────
+    算法：
+      1. 将录音切分为若干 10 秒片段
+      2. 对每个片段再细分为 2048 点短帧，加 Hanning 窗后做 FFT
+      3. 对片段内所有帧的频谱幅度取平均，转换为 dB 表示
+      4. 以不同颜色绘制各片段的平均频谱曲线（颜色按时间顺序排列）
+
+    输出指标：
+      - 切片数：录音被分为多少个 10 秒片段
+
+    图表说明：
+      - 每条彩色曲线代表一个 10 秒片段的频率分布
+      - 曲线越重合，说明前后音色越一致
+      - 正常人声主要能量集中在 300–3400 Hz
+    """
     slice_len = 10 * sr
     n_slices = max(1, len(samples) // slice_len)
     nfft = 2048
@@ -848,7 +1144,23 @@ def _analyze_ltas(samples, sr, output_path):
 
 
 def _analyze_zcr(samples, sr, output_path):
-    """过零率随时间变化。"""
+    """
+    过零率变化 (ZCR — Zero Crossing Rate)
+    ────────────────────────────────────────
+    算法：将音频切分为 25ms 帧（步长 10ms），统计每帧内信号穿越零点的次数。
+      ZCR = count( sign(x[n]) ≠ sign(x[n-1]) ) / (2 × frame_len)
+
+    物理含义：
+      - 高 ZCR（> 0.15）：对应清辅音（摩擦音 s/sh/f/z）或背景高频噪声
+      - 低 ZCR（< 0.05）：对应元音（a/o/e）或静默段
+
+    输出指标：
+      - 平均ZCR：全程平均过零率，正常人声约 0.05–0.20
+
+    图表说明：
+      - 粉红色折线 = 过零率随时间变化
+      - 尖峰对应清辅音密集区域
+    """
     frame_len = int(0.025 * sr)
     hop_len = int(0.010 * sr)
     frames = _frame_signal(samples, frame_len, hop_len)
@@ -868,7 +1180,26 @@ def _analyze_zcr(samples, sr, output_path):
 
 
 def _analyze_pitch(samples, sr, output_path):
-    """基频 (F0) 估计 – FFT 自相关法。"""
+    """
+    基频变化 (F0 — Fundamental Frequency / Pitch)
+    ──────────────────────────────────────────────
+    算法：FFT 自相关法（ACF via FFT）
+      1. 将音频切分为 40ms 帧（步长 20ms）
+      2. 对每帧做去均值处理后，利用 FFT 快速计算自相关函数（ACF）
+      3. 在 80–400 Hz 对应的滞后范围内寻找 ACF 峰值
+      4. 峰值相关系数 > 0.25 时判定为有声段，否则标记为 0（无音调）
+
+    搜索范围：80–400 Hz（覆盖成人男女及儿童人声的全部音域）
+
+    输出指标：
+      - 平均F0：有声段的平均基频
+        参考：男声约 100–150 Hz，女声约 180–250 Hz
+
+    图表说明：
+      - 紫色散点 = 逐帧基频估计值
+      - 空白处 = 静默段或声音太弱（无法检测音调）
+      - 曲线起伏丰富 → 抑扬顿挫明显，感情饱满
+    """
     frame_len = int(0.040 * sr)
     hop_len = int(0.020 * sr)
     frames = _frame_signal(samples, frame_len, hop_len)
@@ -913,7 +1244,26 @@ def _analyze_pitch(samples, sr, output_path):
 
 
 def _analyze_snr(samples, sr, output_path):
-    """信噪比估计：以最低 10% 能量帧为噪声基底。"""
+    """
+    信噪比 (SNR — Signal-to-Noise Ratio)
+    ──────────────────────────────────────
+    算法：基于噪底估计法（Noise Floor Estimation）
+      1. 将音频切分为 25ms 帧（步长 10ms），计算每帧能量
+      2. 取能量最低的 10% 帧作为「噪声样本」，计算其平均能量（噪底）
+      3. 逐帧 SNR = 10 × log10(帧能量 / 噪底)，限幅在 -20~60 dB
+      4. 全局 SNR = 10 × log10(全局平均能量 / 噪底)
+
+    适用场景：稳态背景噪声（如风扇声、空调声、电流声）
+    注意：本算法假设噪音功率相对稳定，突发噪音的估计可能不准确。
+
+    输出指标：
+      - 全局SNR：综合信噪比
+        ≥ 30 dB = 优秀 | 20–30 dB = 良好 | 10–20 dB = 一般 | < 10 dB = 较差
+
+    图表说明：
+      - 蓝色折线 = 逐帧信噪比
+      - 红色虚线 = 全局平均 SNR
+    """
     frame_len = int(0.025 * sr)
     hop_len = int(0.010 * sr)
     frames = _frame_signal(samples, frame_len, hop_len)
@@ -945,7 +1295,27 @@ def _analyze_snr(samples, sr, output_path):
 
 
 def _analyze_mfcc(samples, sr, output_path):
-    """梅尔频率倒谱系数 (MFCC)。"""
+    """
+    梅尔频率倒谱系数 (MFCC — Mel-Frequency Cepstral Coefficients)
+    ──────────────────────────────────────────────────────────────
+    算法：手动实现（不依赖 librosa/sklearn）
+      1. 将音频切分为 25ms 帧（步长 20ms），加 Hanning 窗
+      2. 对每帧做 FFT，计算功率谱
+      3. 构建 40 个 Mel 尺度三角滤波器，映射到 Mel 频率
+      4. 对 Mel 能量取 log，再做 Type-II DCT，保留前 13 个系数
+
+    参数：n_mfcc=13, n_mels=40, FFT 点数=2048
+
+    物理含义：
+      - MFCC₀（第0行）：帧能量，类似 RMS
+      - MFCC₁–₃（第1-3行）：声道共鸣特征（音色粗轮廓）
+      - MFCC₄–₁₂（第4-12行）：发音细节特征
+
+    图表说明：
+      - 热图：横轴=时间，纵轴=系数编号，颜色=系数值
+      - 暖色（红）= 正值，冷色（蓝）= 负值
+      - 颜色均匀 = 音色稳定；局部突变 = 口误/破音
+    """
     n_mfcc, n_mels, nfft = 13, 40, 2048
     frame_len = int(0.025 * sr)
     hop_len = int(0.020 * sr)
@@ -1003,7 +1373,27 @@ def _analyze_mfcc(samples, sr, output_path):
 
 
 def _analyze_crest(samples, sr, output_path):
-    """峰值因子 (Crest Factor)。"""
+    """
+    峰值因子 (Crest Factor)
+    ────────────────────────
+    算法：
+      1. 将音频切分为 25ms 帧（步长 10ms）
+      2. 计算每帧的 RMS（均方根）和峰值（绝对值最大值）
+      3. 峰值因子 = 20 × log10(峰值 / RMS)，单位 dB
+
+    物理含义：
+      峰值因子反映声音的「动态范围」，即瞬间最强音比平均音响了多少。
+      - 正常人声：10–20 dB
+      - 过高（> 25 dB）：爆破音、破音，气流控制不足
+      - 过低（< 6 dB）：动态压缩，声音沉闷缺乏活力
+
+    输出指标：
+      - 平均峰值因子：全程平均动态范围，建议 10–20 dB
+
+    图表说明：
+      - 棕色折线 = 逐帧峰值因子（dB）
+      - 尖峰 = 爆破音或突发噪音的位置
+    """
     frame_len = int(0.025 * sr)
     hop_len = int(0.010 * sr)
     frames = _frame_signal(samples, frame_len, hop_len)
@@ -1025,7 +1415,28 @@ def _analyze_crest(samples, sr, output_path):
 
 
 def _analyze_entropy(samples, sr, output_path):
-    """频谱熵。"""
+    """
+    频谱熵 (Spectral Entropy)
+    ──────────────────────────
+    算法：
+      1. 将音频切分为 25ms 帧（步长 20ms），加 Hanning 窗，做 1024 点 FFT
+      2. 将功率谱归一化为概率分布：P(f) = X(f)² / Σ X(f)²
+      3. 计算 Shannon 熵：H = -Σ P(f) × log₂ P(f)
+      4. 除以 log₂(N) 归一化到 0–1
+
+    物理含义（已归一化）：
+      - 接近 0：能量集中在少数频率（纯音、清晰元音）
+      - 接近 1：能量均匀分散（白噪声、摩擦辅音）
+      - 正常有声段：0.5–0.8
+      - 静默/噪音段：0.8–0.95
+
+    输出指标：
+      - 平均熵：全程平均频谱熵，理想有声段约 0.5–0.75
+
+    图表说明：
+      - 绿色折线 = 归一化频谱熵随时间变化
+      - 语音段与静默段的熵值差异 → 语音清晰度的间接指标
+    """
     frame_len = int(0.025 * sr)
     hop_len = int(0.020 * sr)
     nfft = 1024
@@ -1059,7 +1470,29 @@ def _analyze_entropy(samples, sr, output_path):
 
 
 def _analyze_spectrogram(samples, sr, output_path):
-    """语谱图 (Spectrogram)。"""
+    """
+    语谱图 (Spectrogram)
+    ──────────────────────
+    算法：短时傅里叶变换（STFT）
+      1. 将音频切分为 25ms 帧（步长 20ms），加 Hanning 窗
+      2. 对每帧做 2048 点 FFT，取幅度谱
+      3. 转换为 dB：20 × log10(|X(f,t)|)
+      4. 以热图形式展示（显示范围限制在 0–8000 Hz）
+
+    图表解读：
+      - 横轴：时间（秒）
+      - 纵轴：频率（Hz），0 在下，高频在上
+      - 颜色（inferno 配色）：越亮（橙/白）= 能量越强，越暗（黑）= 能量越弱
+
+    典型模式：
+      ┌──────────────────────────────────────────────┐
+      │ 宽频横纹（持续亮带）  → 元音（a/o/e/i/u）     │
+      │ 宽频竖纹（瞬态）     → 爆破辅音（b/p/d/t）    │
+      │ 高频斜纹/噪声带      → 摩擦辅音（s/sh/f/h）   │
+      │ 全频空白（黑色区域） → 停顿/换气              │
+      │ 低频持续亮带(<300Hz) → 环境低频噪声            │
+      └──────────────────────────────────────────────┘
+    """
     nfft = 2048
     frame_len = int(0.025 * sr)
     hop_len = int(0.020 * sr)

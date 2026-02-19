@@ -256,19 +256,40 @@ def _build_general_tab(self, general_frame, register_component):
     )
     charts_lf.pack(fill="x", padx=10, pady=10)
 
-    # 热力图
-    register_component(
-        "labels", "general_chart_heat_title",
-        tk.Label(charts_lf, text="打卡热力图", font=("微软雅黑", 12)),
-    ).pack(anchor="w", pady=(5, 5))
+    # 热力图 — 标题 + 年份切换
+    heatmap_title_frame = tk.Frame(charts_lf)
+    heatmap_title_frame.pack(fill="x", pady=(5, 5))
+    tk.Label(heatmap_title_frame, text="打卡热力图", font=("微软雅黑", 12)).pack(side="left")
+
+    year_nav = tk.Frame(heatmap_title_frame)
+    year_nav.pack(side="right")
+    self._heatmap_year_prev_btn = tk.Button(
+        year_nav, text="◀", font=("微软雅黑", 10), width=3, relief="flat",
+        state="disabled", command=lambda: _switch_heatmap_year(self, -1),
+    )
+    self._heatmap_year_prev_btn.pack(side="left", padx=2)
+    self._heatmap_year_label = tk.Label(
+        year_nav, text="----", font=("微软雅黑", 12, "bold"), width=8, anchor="center",
+    )
+    self._heatmap_year_label.pack(side="left", padx=4)
+    self._heatmap_year_next_btn = tk.Button(
+        year_nav, text="▶", font=("微软雅黑", 10), width=3, relief="flat",
+        state="disabled", command=lambda: _switch_heatmap_year(self, 1),
+    )
+    self._heatmap_year_next_btn.pack(side="left", padx=2)
+
     heatmap_container = tk.Frame(charts_lf, height=200, bg="#2b2b2b")
     heatmap_container.pack(fill="x", expand=True, pady=(0, 15))
     heatmap_container.pack_propagate(False)
-    register_component(
-        "labels", "general_chart_heat_ph",
-        tk.Label(heatmap_container, text="[打卡热力图区域]", fg="#888888", bg="#2b2b2b"),
-    ).place(relx=0.5, rely=0.5, anchor="center")
+    tk.Label(heatmap_container, text="[打卡热力图区域]", fg="#888888", bg="#2b2b2b").place(
+        relx=0.5, rely=0.5, anchor="center",
+    )
     self.chart_frame_heatmap = heatmap_container
+
+    # 初始化跨年状态
+    self._heatmap_years = []
+    self._heatmap_paths = {}
+    self._heatmap_current_idx = 0
 
     # 趋势图
     register_component(
@@ -589,40 +610,51 @@ def _show_analysis_dialog(self):
     """弹出复选框对话框，让用户选择要执行的音频分析项目。"""
     dialog = tk.Toplevel(self.main_window)
     dialog.title("选择音频分析项目")
-    dialog.geometry("360x480")
-    dialog.resizable(False, False)
+    dialog.geometry("420x560")
+    dialog.resizable(False, True)
     dialog.transient(self.main_window)
     dialog.grab_set()
 
     # 居中于主窗口
     dialog.update_idletasks()
-    px = self.main_window.winfo_rootx() + (self.main_window.winfo_width() - 360) // 2
-    py = self.main_window.winfo_rooty() + (self.main_window.winfo_height() - 480) // 2
+    px = self.main_window.winfo_rootx() + (self.main_window.winfo_width() - 420) // 2
+    py = self.main_window.winfo_rooty() + (self.main_window.winfo_height() - 560) // 2
     dialog.geometry(f"+{max(0, px)}+{max(0, py)}")
 
     tk.Label(
         dialog, text="请勾选需要分析的项目：", font=("微软雅黑", 11)
-    ).pack(anchor="w", padx=15, pady=(12, 6))
+    ).pack(anchor="w", padx=15, pady=(12, 2))
+    tk.Label(
+        dialog,
+        text="💡 分析完成后，每项结果下方均附有通俗说明，点击「查看指标说明」可展开详细解读。",
+        fg="#6c757d", font=("微软雅黑", 8),
+        wraplength=390, justify="left",
+    ).pack(anchor="w", padx=15, pady=(0, 8))
 
     analysis_options = [
-        ("vad",         "语音活动检测 (VAD)"),
-        ("rms",         "短时能量 (RMS)"),
-        ("ltas",        "长时平均能量 (10s 切片)"),
-        ("zcr",         "过零率变化"),
-        ("pitch",       "基频变化 (F0)"),
-        ("snr",         "信噪比 (SNR)"),
-        ("mfcc",        "梅尔倒谱 (MFCC)"),
-        ("crest",       "峰值因子 (Crest Factor)"),
-        ("entropy",     "频谱熵 (Spectral Entropy)"),
-        ("spectrogram", "语谱图 (Spectrogram)"),
+        ("vad",         "语音活动检测 (VAD)",    "检测哪些时刻在说话，分析朗读连贯性"),
+        ("rms",         "短时能量 (RMS)",        "音量变化趋势，反映声音的轻重起伏"),
+        ("ltas",        "长时平均能量 (10s 切片)", "对比各段频率分布，判断音色稳定性"),
+        ("zcr",         "过零率变化",             "清辅音与元音的分布，辅助判断发音清晰度"),
+        ("pitch",       "基频变化 (F0)",          "音调高低的变化，反映抑扬顿挫程度"),
+        ("snr",         "信噪比 (SNR)",           "录音干净程度，≥20dB 为良好"),
+        ("mfcc",        "梅尔倒谱 (MFCC)",        "音色特征矩阵，语音识别核心特征"),
+        ("crest",       "峰值因子 (Crest Factor)", "动态范围，检测爆破音与声音压缩"),
+        ("entropy",     "频谱熵 (Spectral Entropy)","频谱随机程度，辅助区分语音与噪音"),
+        ("spectrogram", "语谱图 (Spectrogram)",   "时频能量全景图，最直观的语音可视化"),
     ]
 
     cb_vars = {}
-    for key, label in analysis_options:
+    for key, label, hint in analysis_options:
+        row = tk.Frame(dialog)
+        row.pack(fill="x", padx=12, pady=1)
         var = tk.BooleanVar(value=True)
         tk.Checkbutton(
-            dialog, text=label, variable=var, font=("微软雅黑", 10), anchor="w"
-        ).pack(fill="x", padx=20, pady=2)
+            row, text=label, variable=var, font=("微软雅黑", 10), anchor="w",
+        ).pack(side="left")
+        tk.Label(
+            row, text=hint, fg="#adb5bd", font=("微软雅黑", 8), anchor="w",
+        ).pack(side="left", padx=(4, 0))
         cb_vars[key] = var
 
     # 全选 / 全不选
@@ -683,12 +715,23 @@ def _start_audio_analysis(self, selected_keys):
     # 创建加载占位
     placeholders = {}
     for key in selected_keys:
+        desc = audio_analasy.ANALYSIS_DESCRIPTIONS.get(key, {})
         title = audio_analasy.ANALYSIS_ITEMS.get(key, key)
+        brief = desc.get("brief", "")
+
         lf = tk.LabelFrame(
             self._analysis_results_frame, text=title,
             font=("微软雅黑", 11, "bold"), padx=8, pady=8,
         )
         lf.pack(fill="x", pady=6)
+
+        # Brief description row
+        if brief:
+            tk.Label(
+                lf, text=brief, fg="#6c757d", font=("微软雅黑", 9),
+                wraplength=700, justify="left",
+            ).pack(anchor="w", pady=(0, 4))
+
         tk.Label(lf, text="⏳ 分析中…", fg="#888888", font=("微软雅黑", 10)).pack(anchor="w")
         placeholders[key] = lf
 
@@ -720,8 +763,17 @@ def _on_single_analysis_done(self, key, result, placeholders):
     if not lf or not lf.winfo_exists():
         return
 
-    for w in lf.winfo_children():
+    # 清空占位内容（保留 brief 标签，即第一个子控件）
+    children = lf.winfo_children()
+    # brief label is the first child if it exists, keep it; remove the rest
+    for w in children[1:] if len(children) > 0 else children:
         w.destroy()
+    # Also remove the loading label (always the last child at this point)
+    remaining = lf.winfo_children()
+    for w in remaining:
+        # destroy non-brief labels (the ⏳ loading label)
+        if isinstance(w, tk.Label) and "⏳" in (w.cget("text") or ""):
+            w.destroy()
 
     if "error" in result:
         tk.Label(
@@ -756,13 +808,102 @@ def _on_single_analysis_done(self, key, result, placeholders):
     else:
         tk.Label(lf, text="无图表数据", fg="gray", font=("微软雅黑", 10)).pack(anchor="w")
 
-    # 附加信息
+    # ── 指标数值区域 ──
     extra = result.get("extra", {})
+    desc = audio_analasy.ANALYSIS_DESCRIPTIONS.get(key, {})
+    extra_tips = desc.get("extra_tips", {})
+    detail_text = desc.get("detail", "")
+
     if extra:
-        info_text = "  |  ".join(f"{k}: {v}" for k, v in extra.items())
-        tk.Label(lf, text=info_text, fg="#6c757d", font=("微软雅黑", 9)).pack(
-            anchor="w", pady=(4, 0)
+        metrics_frame = tk.Frame(lf)
+        metrics_frame.pack(anchor="w", fill="x", pady=(6, 0))
+        for idx, (k, v) in enumerate(extra.items()):
+            tip = extra_tips.get(k, "")
+            # 指标值标签
+            val_lf = tk.Frame(metrics_frame, relief="groove", bd=1, padx=6, pady=4)
+            val_lf.grid(row=0, column=idx, padx=(0, 8), sticky="w")
+            tk.Label(
+                val_lf, text=k, fg="#6c757d", font=("微软雅黑", 8),
+            ).pack(anchor="w")
+            tk.Label(
+                val_lf, text=str(v), fg="#17a2b8", font=("微软雅黑", 11, "bold"),
+            ).pack(anchor="w")
+            if tip:
+                tk.Label(
+                    val_lf, text=tip, fg="#adb5bd", font=("微软雅黑", 8),
+                    wraplength=200, justify="left",
+                ).pack(anchor="w", pady=(2, 0))
+
+    # ── 可展开的详细说明 ──
+    if detail_text:
+        detail_visible = tk.BooleanVar(value=False)
+        detail_content = tk.Frame(lf, bg="#f8f9fa", padx=8, pady=6, relief="flat", bd=1)
+        detail_label = tk.Label(
+            detail_content,
+            text=detail_text,
+            fg="#495057", bg="#f8f9fa",
+            font=("微软雅黑", 9),
+            justify="left",
+            wraplength=700,
+            anchor="nw",
         )
+        detail_label.pack(fill="x", anchor="w")
+
+        toggle_btn = tk.Button(
+            lf, text="📖 查看指标说明 ▼",
+            font=("微软雅黑", 9), relief="flat", fg="#007bff",
+            cursor="hand2",
+        )
+        toggle_btn.pack(anchor="w", pady=(6, 0))
+
+        def _toggle_detail(btn=toggle_btn, frame=detail_content, var=detail_visible):
+            if var.get():
+                frame.pack_forget()
+                btn.config(text="📖 查看指标说明 ▼")
+                var.set(False)
+            else:
+                frame.pack(fill="x", pady=(4, 0))
+                btn.config(text="📖 收起说明 ▲")
+                var.set(True)
+
+        toggle_btn.config(command=_toggle_detail)
+
+# ══════════════════════════════════════════════════════════
+#  热力图年份切换
+# ══════════════════════════════════════════════════════════
+
+def _switch_heatmap_year(self, direction):
+    """切换热力图年份。direction: -1 上一年, +1 下一年。"""
+    if not self._heatmap_years:
+        return
+    new_idx = self._heatmap_current_idx + direction
+    if new_idx < 0 or new_idx >= len(self._heatmap_years):
+        return
+    self._heatmap_current_idx = new_idx
+    _refresh_heatmap_display(self)
+
+
+def _refresh_heatmap_display(self):
+    """根据当前选中年份刷新热力图图片和按钮状态。"""
+    if not self._heatmap_years:
+        self._heatmap_year_label.config(text="----")
+        self._heatmap_year_prev_btn.config(state="disabled")
+        self._heatmap_year_next_btn.config(state="disabled")
+        return
+
+    year = self._heatmap_years[self._heatmap_current_idx]
+    self._heatmap_year_label.config(text=f"{year} 年")
+
+    self._heatmap_year_prev_btn.config(
+        state="normal" if self._heatmap_current_idx > 0 else "disabled"
+    )
+    self._heatmap_year_next_btn.config(
+        state="normal" if self._heatmap_current_idx < len(self._heatmap_years) - 1 else "disabled"
+    )
+
+    path = self._heatmap_paths.get(year) or self._heatmap_paths.get(str(year), "")
+    _load_and_display_image(path, self.chart_frame_heatmap)
+
 
 # ══════════════════════════════════════════════════════════
 #  数据面板刷新
@@ -814,11 +955,29 @@ def _update_dashboard_ui(self, dashboard_data):
         self.data_labels["最长时长"].configure(text=f"{dur_val:.0f}s ({dur_date})")
 
         # --- Update Charts (Heatmap & Trend) ---
-        heatmap_path = dashboard_data.get('heatmap_path')
+        heatmap_paths_raw = dashboard_data.get('heatmap_paths', {})
         trend_path = dashboard_data.get('trend_path')
 
-        if hasattr(self, 'chart_frame_heatmap') and heatmap_path:
-            _load_and_display_image(heatmap_path, self.chart_frame_heatmap)
+        if hasattr(self, '_heatmap_years'):
+            # JSON 序列化会把 int key 转成 str，统一还原为 int
+            self._heatmap_paths = {}
+            for k, v in heatmap_paths_raw.items():
+                try:
+                    self._heatmap_paths[int(k)] = v
+                except (ValueError, TypeError):
+                    self._heatmap_paths[k] = v
+            self._heatmap_years = sorted(self._heatmap_paths.keys())
+
+            # 默认定位到当前年份，若不存在则定位到最近一年
+            current_year = time.localtime().tm_year
+            if current_year in self._heatmap_years:
+                self._heatmap_current_idx = self._heatmap_years.index(current_year)
+            elif self._heatmap_years:
+                self._heatmap_current_idx = len(self._heatmap_years) - 1
+            else:
+                self._heatmap_current_idx = 0
+
+            _refresh_heatmap_display(self)
 
         if hasattr(self, 'chart_frame_duration'):
             _load_and_display_image(trend_path, self.chart_frame_duration)
