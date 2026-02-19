@@ -84,7 +84,7 @@ def start_socket_server(queue=None):
         CHUNK_SECONDS = 60 # 1 minute
         
         # Calculate bytes per chunk
-        BYTES_PER_CHUNK = SAMPLE_RATE * SAMPLE_WIDTH * CHUNK_SECONDS 
+        BYTES_PER_CHUNK = SAMPLE_RATE * SAMPLE_WIDTH * CHUNK_SECONDS * CHANNELS
         
         output_dir = pathlib.Path(__file__).resolve().parent.parent / "audio_chunks"
         output_dir.mkdir(exist_ok=True)
