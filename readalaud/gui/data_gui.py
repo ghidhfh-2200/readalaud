@@ -10,6 +10,7 @@ import time
 import wave
 import traceback
 import threading
+from datetime import datetime, timedelta
 from PIL import Image, ImageTk
 from .. import audio_analasy
 
@@ -316,6 +317,33 @@ def _build_day_tab(self, day_frame, register_component):
     # Tool Bar for List
     list_tools = tk.Frame(self.day_list_container)
     list_tools.pack(fill="x", padx=10, pady=(5, 0))
+    
+    # 月份选择器
+    month_frame = tk.Frame(list_tools)
+    month_frame.pack(side="left", padx=(0, 15))
+    
+    tk.Label(month_frame, text="选择月份:", font=("微软雅黑", 9)).pack(side="left", padx=(0, 8))
+    
+    # 初始化月份选择器状态
+    self._selected_month = datetime.now().strftime("%Y-%m")
+    self._available_months = []
+    
+    month_combo = ttk.Combobox(
+        month_frame, width=12, font=("微软雅黑", 9),
+        state="readonly", textvariable=tk.StringVar(value=self._selected_month)
+    )
+    month_combo.pack(side="left")
+    register_component("buttons", "day_month_combo", month_combo)
+    
+    def _on_month_change(_):
+        """处理月份选择变化"""
+        selected = month_combo.get()
+        if selected:
+            self._selected_month = selected
+            _load_day_tree_for_month(self)
+    
+    month_combo.bind("<<ComboboxSelected>>", _on_month_change)
+    self._month_combo = month_combo
     
     register_component(
         "buttons", "day_list_refresh",
@@ -982,14 +1010,55 @@ def _update_dashboard_ui(self, dashboard_data):
         if hasattr(self, 'chart_frame_duration'):
             _load_and_display_image(trend_path, self.chart_frame_duration)
 
-        # --- Update Day List Treeview ---
+        # --- Update Day List Treeview (按需加载月份) ---
         if hasattr(self, 'day_tree'):
-            for item in self.day_tree.get_children():
-                self.day_tree.delete(item)
-
-            for record in dashboard_data.get('daily_records', []):
-                self.day_tree.insert("", tk.END, values=record)
+            # 1. 获取所有有数据的月份
+            available_months = audio_analasy.get_available_months(self)
+            self._available_months = available_months
+            
+            # 2. 更新月份选择器
+            current_month = datetime.now().strftime("%Y-%m")
+            if hasattr(self, '_month_combo'):
+                self._month_combo['values'] = available_months
+                
+                # 如果当前已有选中项且在列表内，保持不变；否则默认选中当月或最新月
+                current_selected = getattr(self, '_selected_month', None)
+                if current_selected and current_selected in available_months:
+                     pass # keep it
+                elif current_month in available_months:
+                    self._selected_month = current_month
+                    self._month_combo.set(current_month)
+                elif available_months:
+                    self._selected_month = available_months[0]
+                    self._month_combo.set(available_months[0])
+                else:
+                    self._selected_month = current_month # No data case
+            
+            # 3. 加载当前月份的数据
+            _load_day_tree_for_month(self)
 
     except Exception as e:
         print(f"Error updating dashboard UI: {e}")
         traceback.print_exc()
+
+
+def _load_day_tree_for_month(self):
+    """加载指定月份的每日数据到 TreeView"""
+    if not hasattr(self, 'day_tree'):
+        return
+    
+    # 清空树
+    for item in self.day_tree.get_children():
+        self.day_tree.delete(item)
+    
+    # 获取选中的月份
+    selected_month = getattr(self, '_selected_month', None)
+    if not selected_month:
+        return
+
+    # 调用后端新接口只获取该月数据
+    records = audio_analasy.get_daily_records_by_month(self, selected_month)
+    
+    # 添加数据到树
+    for record in records:
+        self.day_tree.insert("", tk.END, values=record)

@@ -490,7 +490,7 @@ def refresh_dashboard_data(self, force_refresh=False):
         "max_efficiency_date": max_efficiency_date,
         "max_duration_val": max_duration_val,
         "max_duration_date": max_duration_date,
-        "daily_records": sorted(daily_records, key=lambda x: x[0], reverse=True),
+        "daily_records": [], # 列表过大导致内存问题，改用 get_daily_records_by_month 分页获取
         "heatmap_years": sorted(heatmap_results.keys()),
         "heatmap_paths": {str(k): v for k, v in heatmap_results.items()},
         "trend_path": trend_path,
@@ -504,6 +504,52 @@ def refresh_dashboard_data(self, force_refresh=False):
         json.dump(cache_dict, f, indent=4)
 
     return result_data
+
+def get_available_months(self):
+    """
+    [API] 获取所有有记录的月份 (降序)
+    """
+    account = getattr(self, "current_acount", None)
+    if not account:
+        return []
+    base_url = f"./data/{account}/"
+    if not os.path.exists(base_url):
+        return []
+    months = []
+    try:
+        for item in os.listdir(base_url):
+            if os.path.isdir(os.path.join(base_url, item)):
+                try:
+                    datetime.strptime(item, "%Y-%m")
+                    months.append(item)
+                except ValueError:
+                    pass
+    except Exception:
+        pass
+    return sorted(months, reverse=True)
+
+def get_daily_records_by_month(self, month_str):
+    """
+    [API] 获取指定月份的每日数据记录 (按日期降序)
+    """
+    if not month_str: return []
+    account = getattr(self, "current_acount", None)
+    if not account: return []
+    data_dir = f"./data/{account}/{month_str}"
+    if not os.path.exists(data_dir): return []
+    
+    records = []
+    try:
+        files = [f for f in os.listdir(data_dir) if f.endswith(".json")]
+        files.sort(reverse=True)
+        for file in files:
+            try:
+                with open(os.path.join(data_dir, file), "r", encoding='utf-8') as f:
+                    d = json.load(f)
+                    records.append((file.replace(".json", ""), int(d.get('total',0)), int(d.get('stop_total',0)), f"{float(d.get('efficiency',0)):.2f}"))
+            except: continue
+    except: pass
+    return records
 
 def _save_volume_chart(data, save_path):
     try:
