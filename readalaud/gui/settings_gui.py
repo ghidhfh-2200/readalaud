@@ -7,7 +7,7 @@ from tkinter import ttk
 import ttkbootstrap as ttkbs
 from markdown import markdown
 from tkhtmlview import HTMLLabel
-from .. import settings
+from ..settings import _load_settings
 from .tts_gui import (
     on_treeview_click,
     volume_scale_change,
@@ -54,7 +54,7 @@ def _generate_settings_gui(self):
         command=lambda: self.welcome_page(destroy_window=[self.settings_frame, "settings"]),
     )
     back_button.pack(side="right")
-    settings._load_settings(self=self)
+    _load_settings(self=self)
 
 
 # ═══════════════════════ 账号 Tab ═══════════════════════

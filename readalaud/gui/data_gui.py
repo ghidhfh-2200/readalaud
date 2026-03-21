@@ -12,7 +12,7 @@ import traceback
 import threading
 from datetime import datetime, timedelta
 from PIL import Image, ImageTk
-from .. import audio_analasy
+from .. import audio_analysis as audio_analasy
 
 
 # ══════════════════════════════════════════════════════════

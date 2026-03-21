@@ -4,7 +4,7 @@
 
 import tkinter as tk
 from tkinter import messagebox
-from .. import reading
+from ..reading import reading_data_get_and_check, start_reading
 
 
 def _generate_reading_gui(self):
@@ -84,13 +84,13 @@ def _generate_reading_gui(self):
     self.show_debug.config(yscrollcommand=debug_scroll.set)
     debug_scroll.pack(side=tk.RIGHT, fill=tk.Y)
     self.show_debug.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-    reading.reading_data_get_and_check(self)
+    reading_data_get_and_check(self)
 
 
 # ──────────────────────── 辅助回调 ────────────────────────
 
 def _start_reading(self):
-    reading.start_reading(self=self)
+    start_reading(self=self)
 
 
 def _reading_back(self):

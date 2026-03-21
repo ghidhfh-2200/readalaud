@@ -6,7 +6,8 @@ import tkinter as tk
 from tkinter import messagebox
 import base64
 import ttkbootstrap as ttkbs
-from .. import calibration, server_manager
+from ..calibration import start_calibration
+from ..server import check_if_server_running, server_pid, end_server_process, start_manager
 
 
 # ──────────────────────── 主窗口 ────────────────────────
@@ -61,7 +62,7 @@ def _generate_main_window(self):
 def check_if_reading(self):
     if self.if_reading:
         # 双重检查：确认服务器确实还在运行
-        server_running = server_manager.check_if_server_running()
+        server_running = check_if_server_running()
         if server_running:
             messagebox.showinfo(title="无法关闭", message="当前正在朗读，请结束朗读后再关闭主窗口！")
         else:
@@ -72,7 +73,7 @@ def check_if_reading(self):
                 self.main_window.destroy()
     else:
         # 检查服务器是否仍在后台运行
-        server_running = server_manager.check_if_server_running()
+        server_running = check_if_server_running()
         if server_running:
             action = messagebox.askyesnocancel(
                 title="服务器仍在运行",
@@ -80,9 +81,9 @@ def check_if_reading(self):
             )
             if action is True:
                 # 关闭服务器并退出
-                pid = server_manager.server_pid()
+                pid = server_pid()
                 if pid:
-                    server_manager.end_server_process(pid=pid, force=True)
+                    end_server_process(pid=pid, force=True)
                 self.main_window.destroy()
             elif action is False:
                 # 保留服务器并退出
@@ -144,7 +145,7 @@ def _welcome_page(self, destroy_window):
             master=main_label_frame,
             text="麦克风校准",
             font=self.mainpage_button_font,
-            command=lambda: calibration.start_calibration(self),
+            command=lambda: start_calibration(self),
         )
         calibration_button.pack(fill=tk.BOTH, expand=1, pady=5)
         data_button = tk.Button(
@@ -158,6 +159,6 @@ def _welcome_page(self, destroy_window):
             master=main_label_frame,
             text="服务器管理",
             font=self.mainpage_button_font,
-            command=lambda: server_manager.start_manager(self),
+            command=lambda: start_manager(self),
         )
         server_manager_btn.pack(fill=tk.BOTH, expand=1, pady=1)

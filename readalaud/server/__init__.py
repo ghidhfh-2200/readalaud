@@ -9,6 +9,7 @@ server 子包 —— FastAPI HTTP/WebSocket 服务器与进程管理。
 
 from .socket_server import bind_server_api, start_socket_server
 from .process_manager import bind_server_manager_api, check_if_server_running, server_pid, end_server_process
+from .manager_window import start_manager
 
 __all__ = [
     "bind_server_api",
@@ -17,4 +18,5 @@ __all__ = [
     "check_if_server_running",
     "server_pid",
     "end_server_process",
+    "start_manager",
 ]

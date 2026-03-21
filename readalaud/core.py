@@ -26,7 +26,7 @@ class ReadAlaud:
         self.current_acount = ""
         self.if_time_and_text_config_popup = False
         self.if_reading = False
-        self.if_audio_analasy_running = False
+        self.if_audio_analysis_running = False
 
         self.font = ("微软雅黑", 17)
         self.mainpage_button_font = ("微软雅黑", 12)

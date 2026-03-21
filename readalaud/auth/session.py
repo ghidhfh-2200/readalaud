@@ -7,7 +7,7 @@ import os
 import shutil
 import hashlib
 from tkinter import messagebox
-
+import secrets
 from .account_io import load_accounts, save_accounts, ensure_user_dir, DEFAULT_SETTINGS
 
 
@@ -47,8 +47,12 @@ def _login_and_sign_up(self):
 def _register_new_account(self, username, password, read_json):
     if not messagebox.askyesno(title="注册新账号？", message="此操作将会注册新账号\n是否继续？"):
         return
+    
     encode_acount = base64.b64encode(username.encode("utf-8")).decode("utf-8")
-    encode_password = hashlib.sha256(password.encode("utf-8")).hexdigest()
+    salt = secrets.token_hex(16)
+    hashed_pwd = hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
+    encode_password = f"{salt}${hashed_pwd}"
+    
     read_json["names"].append(encode_acount)
     read_json["passwords"][encode_acount] = encode_password
     self.current_acount = encode_acount
@@ -68,14 +72,18 @@ def _register_new_account(self, username, password, read_json):
 
 def _try_login(self, encoded_account, raw_password, read_json, read_passwords):
     stored_password = read_passwords[encoded_account]
-    input_password_hash = hashlib.sha256(raw_password.encode("utf-8")).hexdigest()
 
-    is_valid = False
-    is_legacy = False
-
-    if stored_password == input_password_hash:
-        is_valid = True
+    if "$" in stored_password:
+        salt, expected_hash = stored_password.split("$", 1)
+        input_password_hash = hashlib.sha256((salt + raw_password).encode("utf-8")).hexdigest()
+        is_valid = (expected_hash == input_password_hash)
     else:
+        # Legacy passwords
+        input_password_hash = hashlib.sha256(raw_password.encode("utf-8")).hexdigest()
+        is_valid = (stored_password == input_password_hash)
+
+    is_legacy = False
+    if not is_valid and "$" not in stored_password:
         try:
             decode_password = base64.b64decode(stored_password).decode("utf-8")
             if decode_password == raw_password:
@@ -88,8 +96,12 @@ def _try_login(self, encoded_account, raw_password, read_json, read_passwords):
         messagebox.showinfo(message="密码错误！", title="密码错误!")
         return
 
-    if is_legacy:
-        read_json["passwords"][encoded_account] = input_password_hash
+    # Migrate legacy base64 or unsalted sha256 to salted hash
+    if "$" not in stored_password:
+        
+        salt = secrets.token_hex(16)
+        hashed_pwd = hashlib.sha256((salt + raw_password).encode("utf-8")).hexdigest()
+        read_json["passwords"][encoded_account] = f"{salt}${hashed_pwd}"
         try:
             save_accounts(read_json)
         except Exception as e:
