@@ -101,6 +101,7 @@ def _save_account_name(self):
             text=f"当前登录：{base64.b64decode(self.current_acount).decode('utf-8')}"
         )
         messagebox.showinfo(message="账户名称修改成功！")
+        self.log_operation("修改账户名", "账户名称已被更改")
     except FileNotFoundError:
         with open("./data/acounts.json", "w") as f:
             json.dump({"names": [], "passwords": {}}, f)
@@ -123,6 +124,7 @@ def _save_password(self):
         with open("./data/acounts.json", "w") as f:
             json.dump(read_accounts, f)
         messagebox.showinfo(message="密码修改成功!")
+        self.log_audit("修改密码", "账户密码已更改")
     except FileNotFoundError:
         with open("./data/acounts.json", "w") as f:
             json.dump({"names": [], "passwords": {}}, f)
@@ -158,6 +160,7 @@ def _write_single_setting(self, key, value, success_msg):
         with open(settings_path, "w") as f:
             json.dump(read_settings, f)
         messagebox.showinfo(message=success_msg)
+        self.log_operation("修改设置", f"修改了设置项: {key} 为 {value}")
     except FileNotFoundError:
         with open(settings_path, "w") as f:
             json.dump(DEFAULT_SETTINGS.copy(), f)

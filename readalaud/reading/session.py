@@ -210,6 +210,7 @@ def start_reading(self):
                 _start_roll_check(self, None)
     else:
         self.if_reading = True
+        self.log_operation("开始朗读", "启动了朗读服务器并打开可视化网页")
         gui_update_queue = ctx.Queue()
         ctx.Process(target=start_socket_server, args=(gui_update_queue,)).start()
         ctx.Process(target=start_webpage).start()

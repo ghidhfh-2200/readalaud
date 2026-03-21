@@ -6,6 +6,7 @@ from .reading import bind_reading_api
 from .audio import bind_audio_analasy_api
 from .calibration import bind_calibration_api
 from .server import bind_server_api, bind_server_manager_api
+from .logger import bind_logger_api, init_db
 
 
 class ReadAlaud:
@@ -14,6 +15,7 @@ class ReadAlaud:
     """
 
     def __init__(self):
+        init_db()  # 初始化日志数据库
         # 状态变量
         self.if_main_window_show = True
         self.if_settings_show = False
@@ -43,6 +45,7 @@ class ReadAlaud:
         bind_calibration_api(self)
         bind_server_api(self)
         bind_server_manager_api(self)
+        bind_logger_api(self)
         # login StringVars will be created when the GUI root exists (in _generate_main_window)
         self.login_password_enter = None
         self.login_acount_enter = None

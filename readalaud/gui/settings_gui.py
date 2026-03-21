@@ -111,6 +111,12 @@ def _build_account_tab(self, account_frame):
     )
     logout_btn.pack(side="left", padx=5)
 
+    log_viewer_btn = tk.Button(
+        account_operation, text="系统日志", fg="blue", font=self.mainpage_button_font, width=20,
+        command=lambda: self.show_log_viewer(),
+    )
+    log_viewer_btn.pack(side="left", padx=5)
+
 
 # ═══════════════════════ 朗读设置 Tab ═══════════════════════
 

@@ -68,7 +68,7 @@ def _register_new_account(self, username, password, read_json):
         messagebox.showerror(message="出错啦!无法创建文件夹！\n可能是因为文件夹已存在或权限问题！")
         return
     messagebox.showinfo(message="账号注册成功，现在你可以进行登录！", title="成功注册新账号！")
-
+    self.log_audit("注册成功", f"注册了账户 {username}")
 
 def _try_login(self, encoded_account, raw_password, read_json, read_passwords):
     stored_password = read_passwords[encoded_account]
@@ -121,6 +121,7 @@ def _try_login(self, encoded_account, raw_password, read_json, read_passwords):
             json.dump(read_settings, f)
 
     self.welcome_page(destroy_window=[self.login_frame, "login"])
+    self.log_audit("登录成功", "账户成功登录系统")
     try:
         import ttkbootstrap as ttkbs
         ttkbs.Style().theme_use(read_settings["theme"])
@@ -146,6 +147,7 @@ def _delete_the_account(self):
         self.if_logged_in = False
         self.welcome_page(destroy_window=[self.settings_frame, "settings"])
         messagebox.showinfo(message="账户已成功注销!")
+        self.log_audit("删除账户", "成功注销并删除了当前账户及其数据")
     except OSError:
         messagebox.showerror(message="删除文件时出错，可能此文件已经删除,或者权限不足导致无法删除！")
     except json.JSONDecodeError:
@@ -168,6 +170,7 @@ def _reset_account_data(self):
         self.if_logged_in = False
         self.welcome_page(destroy_window=[self.settings_frame, "settings"])
         messagebox.showinfo(message="数据已重置，密码保持不变\n请重新登录！")
+        self.log_audit("重置数据", "重置了当前账户的所有数据保留密码")
     except OSError:
         messagebox.showerror(message="删除文件时出错，可能此文件已经删除,或者权限不足导致无法删除！")
 
@@ -181,3 +184,4 @@ def _logout(self):
     except Exception:
         pass
     messagebox.showinfo(message="已成功退出登录！")
+    self.log_audit("退出登录", "账户正常退出系统")
