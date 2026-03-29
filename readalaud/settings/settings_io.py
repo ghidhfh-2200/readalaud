@@ -5,6 +5,7 @@ import hashlib
 import json
 import base64
 import os
+import secrets
 import tkinter as tk
 from tkinter import messagebox
 import ttkbootstrap as ttkbs
@@ -72,9 +73,12 @@ def _load_settings(self):
 # ── 保存各项设置 ──────────────────────────────────────────
 
 def _save_settings_except_tts(self, option):
+    # 对于敏感操作（修改账号名、修改密码），先弹出确认框验证身份
+    if option in ["account", "password"]:
+        _popup_auth_confirm(self, option)
+        return
+
     handlers = {
-        "account":   _save_account_name,
-        "password":  _save_password,
         "goal":      _save_goal,
         "stop_dur":  _save_stop_dur,
         "db_level":  _save_db_level,
@@ -82,6 +86,74 @@ def _save_settings_except_tts(self, option):
     handler = handlers.get(option)
     if handler:
         handler(self)
+
+
+def _popup_auth_confirm(self, option):
+    """弹出验证窗口"""
+    dialog = tk.Toplevel(self.main_window)
+    dialog.title("身份验证")
+    dialog.geometry("300x150")
+    dialog.resizable(False, False)
+    dialog.transient(self.main_window)
+    dialog.grab_set()
+
+    # 居中显示
+    dialog.update_idletasks()
+    px = self.main_window.winfo_rootx() + (self.main_window.winfo_width() - 300) // 2
+    py = self.main_window.winfo_rooty() + (self.main_window.winfo_height() - 150) // 2
+    dialog.geometry(f"+{max(0, px)}+{max(0, py)}")
+
+    tk.Label(dialog, text="请输入当前账号密码以继续：", font=("微软雅黑", 10)).pack(pady=10)
+    pwd_var = tk.StringVar()
+    entry = tk.Entry(dialog, textvariable=pwd_var, show="*", width=25)
+    entry.pack(pady=5)
+    entry.focus_set()
+
+    def on_confirm(event=None):
+        pwd = pwd_var.get()
+        if not pwd:
+            messagebox.showwarning("提示", "密码不能为空", parent=dialog)
+            return
+        
+        # 验证密码
+        if _verify_current_password(self, pwd):
+            dialog.destroy()
+            if option == "account":
+                _save_account_name(self)
+            elif option == "password":
+                _save_password(self)
+        else:
+            messagebox.showerror("认证失败", "密码错误", parent=dialog)
+            self.log_audit("敏感操作认证失败", f"尝试进行 {option} 修改时密码验证失败")
+
+    btn = tk.Button(dialog, text="验证", command=on_confirm, width=10)
+    btn.pack(pady=10)
+    dialog.bind("<Return>", on_confirm)
+
+
+def _verify_current_password(self, input_pwd):
+    """内部使用的密码验证函数"""
+    try:
+        with open("./data/acounts.json", "r") as f:
+            read_accounts = json.load(f)
+        stored_password = read_accounts["passwords"].get(self.current_acount)
+        if not stored_password:
+            return False
+
+        if "$" in stored_password:
+            salt, expected_hash = stored_password.split("$", 1)
+            return hashlib.sha256((salt + input_pwd).encode("utf-8")).hexdigest() == expected_hash
+        else:
+            if stored_password == hashlib.sha256(input_pwd.encode("utf-8")).hexdigest():
+                return True
+            try:
+                if base64.b64decode(stored_password).decode("utf-8") == input_pwd:
+                    return True
+            except Exception:
+                pass
+        return False
+    except Exception:
+        return False
 
 
 def _save_account_name(self):
@@ -114,17 +186,24 @@ def _save_account_name(self):
 def _save_password(self):
     new_password = self.settings_password_value.get()
     if not new_password:
-        messagebox.showwarning(message="密码不能为空!")
+        messagebox.showwarning(message="新密码不能为空!")
         return
-    new_password_hash = hashlib.sha256(new_password.encode("utf-8")).hexdigest()
+    
     try:
         with open("./data/acounts.json", "r") as f:
             read_accounts = json.load(f)
-        read_accounts["passwords"][self.current_acount] = new_password_hash
+        
+        # 加盐保存新密码
+        new_salt = secrets.token_hex(16)
+        new_hashed_pwd = hashlib.sha256((new_salt + new_password).encode("utf-8")).hexdigest()
+        read_accounts["passwords"][self.current_acount] = f"{new_salt}${new_hashed_pwd}"
+        
         with open("./data/acounts.json", "w") as f:
             json.dump(read_accounts, f)
+        
+        self.settings_password_value.set("")
         messagebox.showinfo(message="密码修改成功!")
-        self.log_audit("修改密码", "账户密码已更改")
+        self.log_audit("敏感操作成功", "通过验证后成功修改了账户密码")
     except FileNotFoundError:
         with open("./data/acounts.json", "w") as f:
             json.dump({"names": [], "passwords": {}}, f)

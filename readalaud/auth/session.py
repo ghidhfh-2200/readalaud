@@ -122,6 +122,12 @@ def _try_login(self, encoded_account, raw_password, read_json, read_passwords):
 
     self.welcome_page(destroy_window=[self.login_frame, "login"])
     self.log_audit("登录成功", "账户成功登录系统")
+    # 清除登录框内容
+    try:
+        self.login_acount_enter.delete(0, 'end')
+        self.login_password_enter.delete(0, 'end')
+    except Exception:
+        pass
     try:
         import ttkbootstrap as ttkbs
         ttkbs.Style().theme_use(read_settings["theme"])

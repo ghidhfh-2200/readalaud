@@ -80,8 +80,7 @@ def _build_account_tab(self, account_frame):
 
     password_lf = tk.LabelFrame(master=account_management_label_frame, border=0, font=self.mainpage_button_font)
     password_lf.pack(fill="x", expand=1, padx=5, pady=5)
-    self.account_password_label = tk.Label(master=password_lf, text="密码设置：", font=("微软雅黑", 17))
-    self.account_password_label.pack(side=tk.LEFT)
+    tk.Label(master=password_lf, text="设置新密码：", font=("微软雅黑", 17)).pack(side=tk.LEFT)
     self.settings_password_value = tk.StringVar()
     password_entry = tk.Entry(master=password_lf, width=30, textvariable=self.settings_password_value, font=("微软雅黑", 17),show="*")
     password_entry.pack(side=tk.LEFT)
