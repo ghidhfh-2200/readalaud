@@ -1,6 +1,7 @@
 import sqlite3
 import os
 from datetime import datetime
+import base64
 
 DB_PATH = "./data/system_log.db"
 
@@ -36,9 +37,11 @@ def add_log(account, log_type, action, details=""):
         print(f"Failed to write log: {e}")
 
 def log_audit(account, action, details=""):
+    account = base64.b64decode(account).decode("utf-8")
     add_log(account, "AUDIT", action, details)
 
 def log_operation(account, action, details=""):
+    account = base64.b64decode(account).decode("utf-8")
     add_log(account, "OPERATION", action, details)
 
 def get_logs(log_type=None, limit=1000):
