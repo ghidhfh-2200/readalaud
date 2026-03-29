@@ -67,7 +67,8 @@ def _register_new_account(self, username, password, read_json):
         print(e)
         messagebox.showerror(message="出错啦!无法创建文件夹！\n可能是因为文件夹已存在或权限问题！")
         return
-    messagebox.showinfo(message="账号注册成功，现在你可以进行登录！", title="成功注册新账号！")
+    messagebox.showinfo(message="账号注册成功", title="成功注册新账号！")
+    _try_login(self, encode_acount, password, read_json, read_json["passwords"])
     self.log_audit("注册成功", f"注册了账户 {username}")
 
 def _try_login(self, encoded_account, raw_password, read_json, read_passwords):
