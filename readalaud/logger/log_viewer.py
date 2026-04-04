@@ -1,14 +1,15 @@
 import tkinter as tk
 from tkinter import ttk
-from .log_manager import get_logs
+from datetime import datetime
+from .log_manager import get_logs, get_available_months
 
 def show_log_viewer(self):
     viewer = tk.Toplevel(self.main_window)
     viewer.title("系统日志查看器 (System Log Viewer)")
-    viewer.geometry("800x500")
+    viewer.geometry("900x500")
     # 居中显示
     viewer.update_idletasks()
-    px = self.main_window.winfo_rootx() + (self.main_window.winfo_width() - 800) // 2
+    px = self.main_window.winfo_rootx() + (self.main_window.winfo_width() - 900) // 2
     py = self.main_window.winfo_rooty() + (self.main_window.winfo_height() - 500) // 2
     viewer.geometry(f"+{max(0, px)}+{max(0, py)}")
 
@@ -16,6 +17,23 @@ def show_log_viewer(self):
     ctrl_frame = tk.Frame(viewer)
     ctrl_frame.pack(fill="x", padx=10, pady=10)
 
+    # 选择月份
+    tk.Label(ctrl_frame, text="选择月份:", font=("微软雅黑", 10)).pack(side="left")
+    available_months = get_available_months()
+    available_months.insert(0, "全部月份")
+    
+    month_var = tk.StringVar()
+    # 默认选中当月
+    current_month = datetime.now().strftime("%Y-%m")
+    if current_month in available_months:
+        month_var.set(current_month)
+    else:
+        month_var.set(available_months[1] if len(available_months) > 1 else "全部月份")
+
+    month_combo = ttk.Combobox(ctrl_frame, textvariable=month_var, values=available_months, state="readonly", width=12, font=("微软雅黑", 10))
+    month_combo.pack(side="left", padx=(5, 15))
+
+    # 选择日志类型
     tk.Label(ctrl_frame, text="日志类型:", font=("微软雅黑", 10)).pack(side="left")
     type_var = tk.StringVar(value="ALL")
     type_combo = ttk.Combobox(ctrl_frame, textvariable=type_var, values=["ALL", "AUDIT", "OPERATION"], state="readonly", width=12, font=("微软雅黑", 10))
@@ -24,12 +42,12 @@ def show_log_viewer(self):
     def load_logs(*args):
         for item in tree.get_children():
             tree.delete(item)
-        logs = get_logs(type_var.get())
+        logs = get_logs(log_type=type_var.get(), month=month_var.get())
         for log in logs:
             tree.insert("", "end", values=log)
 
     refresh_btn = tk.Button(ctrl_frame, text="刷新", font=("微软雅黑", 10), command=load_logs)
-    refresh_btn.pack(side="left", padx=10)
+    refresh_btn.pack(side="left", padx=15)
 
     # 列表区
     columns = ("timestamp", "log_type", "account", "action", "details")
@@ -40,11 +58,11 @@ def show_log_viewer(self):
     tree.heading("action", text="操作")
     tree.heading("details", text="详细内容")
 
-    tree.column("timestamp", width=140, anchor="center")
-    tree.column("log_type", width=80, anchor="center")
-    tree.column("account", width=100, anchor="center")
-    tree.column("action", width=150, anchor="center")
-    tree.column("details", width=300, anchor="w")
+    tree.column("timestamp", width=150, anchor="center")
+    tree.column("log_type", width=100, anchor="center")
+    tree.column("account", width=120, anchor="center")
+    tree.column("action", width=160, anchor="center")
+    tree.column("details", width=330, anchor="w")
 
     vsb = ttk.Scrollbar(viewer, orient="vertical", command=tree.yview)
     vsb.pack(side="right", fill="y")
@@ -52,4 +70,5 @@ def show_log_viewer(self):
     tree.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
     type_combo.bind("<<ComboboxSelected>>", load_logs)
+    month_combo.bind("<<ComboboxSelected>>", load_logs)
     load_logs()
