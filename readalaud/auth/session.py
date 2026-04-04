@@ -37,7 +37,7 @@ def _login_and_sign_up(self):
     if not read_names:
         _register_new_account(self, get_input_acount, get_input_password, read_json)
     else:
-        encode_input_acount = base64.b64encode(get_input_acount.encode("utf-8")).decode("utf-8")
+        encode_input_acount = base64.urlsafe_b64encode(get_input_acount.encode("utf-8")).decode("utf-8")
         if encode_input_acount in read_names:
             _try_login(self, encode_input_acount, get_input_password, read_json, read_passwords)
         else:
@@ -48,7 +48,7 @@ def _register_new_account(self, username, password, read_json):
     if not messagebox.askyesno(title="注册新账号？", message="此操作将会注册新账号\n是否继续？"):
         return
     
-    encode_acount = base64.b64encode(username.encode("utf-8")).decode("utf-8")
+    encode_acount = base64.urlsafe_b64encode(username.encode("utf-8")).decode("utf-8")
     salt = secrets.token_hex(16)
     hashed_pwd = hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
     encode_password = f"{salt}${hashed_pwd}"
@@ -86,7 +86,7 @@ def _try_login(self, encoded_account, raw_password, read_json, read_passwords):
     is_legacy = False
     if not is_valid and "$" not in stored_password:
         try:
-            decode_password = base64.b64decode(stored_password).decode("utf-8")
+            decode_password = base64.urlsafe_b64decode(stored_password).decode("utf-8")
             if decode_password == raw_password:
                 is_valid = True
                 is_legacy = True

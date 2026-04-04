@@ -123,7 +123,7 @@ def _welcome_page(self, destroy_window):
     if self.if_logged_in == True:
         try:
             self.current_account_label.config(
-                text=f"当前登录：{base64.b64decode(self.current_acount).decode('utf-8')}"
+                text=f"当前登录：{base64.urlsafe_b64decode(self.current_acount).decode('utf-8')}"
             )
         except Exception:
             self.current_account_label.config(text="当前登录：(已登录)")

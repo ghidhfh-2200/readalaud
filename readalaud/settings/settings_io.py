@@ -43,7 +43,7 @@ def _load_settings(self):
     self.settings_stop_dur_value.set(value=read_settings["stop-dur"])
     self.settings_db_value.set(value=read_settings["db-level"])
     try:
-        self.settings_name_value.set(base64.b64decode(self.current_acount).decode("utf-8"))
+        self.settings_name_value.set(base64.urlsafe_b64decode(self.current_acount).decode("utf-8"))
     except Exception:
         self.settings_name_value.set("")
     self.settings_password_value.set("")
@@ -147,7 +147,7 @@ def _verify_current_password(self, input_pwd):
             if stored_password == hashlib.sha256(input_pwd.encode("utf-8")).hexdigest():
                 return True
             try:
-                if base64.b64decode(stored_password).decode("utf-8") == input_pwd:
+                if base64.urlsafe_b64decode(stored_password).decode("utf-8") == input_pwd:
                     return True
             except Exception:
                 pass
@@ -157,7 +157,7 @@ def _verify_current_password(self, input_pwd):
 
 
 def _save_account_name(self):
-    new_name = base64.b64encode(self.settings_name_value.get().encode("utf-8")).decode("utf-8")
+    new_name = base64.urlsafe_b64encode(self.settings_name_value.get().encode("utf-8")).decode("utf-8")
     try:
         with open("./data/acounts.json", "r") as f:
             read_accounts = json.load(f)
@@ -170,7 +170,7 @@ def _save_account_name(self):
         os.rename(f"./data/{self.current_acount}", f"./data/{new_name}")
         self.current_acount = new_name
         self.current_account_label.config(
-            text=f"当前登录：{base64.b64decode(self.current_acount).decode('utf-8')}"
+            text=f"当前登录：{base64.urlsafe_b64decode(self.current_acount).decode('utf-8')}"
         )
         messagebox.showinfo(message="账户名称修改成功！")
         self.log_operation("修改账户名", "账户名称已被更改")
