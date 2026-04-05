@@ -6,7 +6,7 @@ import subprocess
 import platform
 import socket
 import re
-from tkinter import messagebox
+from ..gui.gui_service import get_gui_service
 
 
 def bind_server_manager_api(instance):
@@ -73,7 +73,7 @@ def end_server_process(force=False, pid=None):
         return "suc"
     except subprocess.CalledProcessError as e:
         if force:
-            messagebox.showerror(message="无法终止已经存在的服务器进程！")
+            get_gui_service().error(message="无法终止已经存在的服务器进程！")
         return str(e)
 
 

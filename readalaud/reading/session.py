@@ -12,7 +12,7 @@ import time
 import tkinter as tk
 import queue as queue_module
 from multiprocessing import get_context
-from tkinter import messagebox
+from ..gui.gui_service import get_gui_service
 
 from readalaud.server import start_socket_server, check_if_server_running, server_pid, end_server_process
 
@@ -151,7 +151,10 @@ def start_webpage():
         elif platform.system() == "Darwin":
             subprocess.call(["open", file_path])
         else:
-            messagebox.showerror("不支持", "您当前操作系统不支持自动打开朗读界面！\n请手动在浏览器打开web目录下的audio_visualizer.html文件")
+            get_gui_service().error(
+                "您当前操作系统不支持自动打开朗读界面！\n请手动在浏览器打开web目录下的audio_visualizer.html文件",
+                title="不支持",
+            )
     except Exception as e:
         log(f"打开文件失败: {e}")
 
@@ -174,7 +177,7 @@ def start_reading(self):
         except Exception as e2:
             log(f"Retry Failed: {e2}", self=self)
             try:
-                messagebox.showerror("写入错误", f"无法创建 temp.json: {e2}")
+                self.gui.error(f"无法创建 temp.json: {e2}", title="写入错误")
             except Exception:
                 pass
             return
@@ -188,7 +191,7 @@ def start_reading(self):
         time.sleep(0.2)
 
     if server_running:
-        ask_restart = messagebox.askyesno(message="服务器正在运行！此操作将会重启服务器，确定继续？")
+        ask_restart = self.gui.ask_yes_no(message="服务器正在运行！此操作将会重启服务器，确定继续？")
         if ask_restart:
             self.if_reading = True
             log("发现僵尸服务器进程，正在尝试清除！", self=self)

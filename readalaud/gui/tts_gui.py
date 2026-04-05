@@ -9,7 +9,7 @@ TTS 语音提示相关 GUI 辅助函数：
 """
 
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk
 import asyncio
 import pyttsx3
 from .. import tts, settings
@@ -74,7 +74,7 @@ def _generate_more_vloices_window(self, source):
     if self.if_all_voices_window_showed == True:
         return
     if source == "web":
-        messagebox.showinfo(message="已切换到EdgeTTS！\nEdgeTTS暂不支持更换语音")
+        self.gui.info(message="已切换到EdgeTTS！\nEdgeTTS暂不支持更换语音")
         get_tts_selected = self.tts_tree.selection()[0]
         current_values = list(self.tts_tree.item(get_tts_selected, "values"))
         current_values[4] = "EdgeTTS Default"
@@ -83,10 +83,14 @@ def _generate_more_vloices_window(self, source):
         self.voice_menu.configure(text="EdgeTTS Default")
         return
     self.if_all_voices_window_showed = True
-    self.more_voices_window = tk.Toplevel(self.main_window)
-    self.more_voices_window.title("更多音色")
-    self.more_voices_window.geometry("460x300")
-    self.more_voices_window.resizable(0, 0)
+    self.more_voices_window = self.gui.create_toplevel(
+        title="更多音色",
+        size=(460, 300),
+        parent=self.main_window,
+        resizable=(False, False),
+        modal=False,
+        center=True,
+    )
 
     table_frame = tk.LabelFrame(master=self.more_voices_window, border=0)
     table_frame.pack(fill="x", expand=True, side="top", padx=5)
@@ -137,7 +141,7 @@ def _select_voices_ok(self, source):
         selected = self.voice_listbox.selection()[0]
         voice_name = self.voice_listbox.item(selected, "values")[0]
     except IndexError:
-        messagebox.showwarning(message="请先选择一个音色！")
+        self.gui.warning(message="请先选择一个音色！")
     try:
         self.voice_var.set(voice_name)
         get_tts_selected = self.tts_tree.selection()[0]
@@ -151,7 +155,7 @@ def _select_voices_ok(self, source):
         self.tts_tree.item(get_tts_selected, values=current_values)
     except IndexError as e:
         print(e)
-        messagebox.showwarning(message="你还没有选择一个语音提示条目！")
+        self.gui.warning(message="你还没有选择一个语音提示条目！")
 
 
 def _destroy_all_voices_window(self):
@@ -213,10 +217,14 @@ def _pop_up_time_and_text_config_window(self):
     if self.if_time_and_text_config_popup == True:
         return
     self.if_time_and_text_config_popup = True
-    popup_window = tk.Toplevel(self.main_window)
-    popup_window.title("触发条件与语音内容配置")
-    popup_window.geometry("400x200")
-    popup_window.resizable(False, False)
+    popup_window = self.gui.create_toplevel(
+        title="触发条件与语音内容配置",
+        size=(400, 200),
+        parent=self.main_window,
+        resizable=(False, False),
+        modal=False,
+        center=True,
+    )
     popup_window.bind("<Destroy>", lambda e: setattr(self, 'if_time_and_text_config_popup', False))
 
     # Try to get current selected tree item values to prefill fields
@@ -387,7 +395,7 @@ def test_tts(self):
         return
     else:
         self.if_generating_ttstest = True
-    ask_if_continue = messagebox.askyesno(
+    ask_if_continue = self.gui.ask_yes_no(
         message="接下来将会生成语音文件进行测试\n请检查参数是否正确\n并决定是否继续"
     )
     if ask_if_continue == True:
@@ -400,12 +408,12 @@ def test_tts(self):
             get_source = list(self.tts_tree.item(selected, "values"))[5]
         except IndexError:
             self.if_generating_ttstest = False
-            messagebox.showwarning(message="你还没有选择一个语音提示条目！")
+            self.gui.warning(message="你还没有选择一个语音提示条目！")
             return
 
         if get_context == "":
             self.if_generating_ttstest = False
-            messagebox.showwarning(message="检测到你的语音内容为空！")
+            self.gui.warning(message="检测到你的语音内容为空！")
             return
 
         def on_complete():
@@ -422,7 +430,7 @@ def test_tts(self):
         if result == "ok":
             pass
         else:
-            messagebox.showerror(message=f"语音生成模块返回报错:{result}")
+            self.gui.error(message=f"语音生成模块返回报错:{result}")
     else:
         self.if_generating_ttstest = False
 

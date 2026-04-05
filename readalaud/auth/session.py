@@ -6,7 +6,6 @@ import base64
 import os
 import shutil
 import hashlib
-from tkinter import messagebox
 import secrets
 from .account_io import load_accounts, save_accounts, ensure_user_dir, DEFAULT_SETTINGS
 
@@ -22,13 +21,13 @@ def _login_and_sign_up(self):
     get_input_acount = self.login_acount_enter.get()
     get_input_password = self.login_password_enter.get()
     if not get_input_acount:
-        messagebox.showwarning(message="必须输入用户名!", title="警告")
+        self.gui.warning(message="必须输入用户名!", title="警告")
         return
 
     try:
         read_json = load_accounts()
     except Exception as e:
-        messagebox.showerror(message=f"无法创建数据文件夹: {e}")
+        self.gui.error(message=f"无法创建数据文件夹: {e}")
         return
 
     read_names = read_json.get("names", [])
@@ -45,7 +44,7 @@ def _login_and_sign_up(self):
 
 
 def _register_new_account(self, username, password, read_json):
-    if not messagebox.askyesno(title="注册新账号？", message="此操作将会注册新账号\n是否继续？"):
+    if not self.gui.ask_yes_no(title="注册新账号？", message="此操作将会注册新账号\n是否继续？"):
         return
     
     encode_acount = base64.urlsafe_b64encode(username.encode("utf-8")).decode("utf-8")
@@ -59,15 +58,15 @@ def _register_new_account(self, username, password, read_json):
     try:
         save_accounts(read_json)
     except FileNotFoundError:
-        messagebox.showerror(message="无法写入acounts.json\n请勿移动该文件!")
+        self.gui.error(message="无法写入acounts.json\n请勿移动该文件!")
         return
     try:
         ensure_user_dir(encode_acount)
     except Exception as e:
         print(e)
-        messagebox.showerror(message="出错啦!无法创建文件夹！\n可能是因为文件夹已存在或权限问题！")
+        self.gui.error(message="出错啦!无法创建文件夹！\n可能是因为文件夹已存在或权限问题！")
         return
-    messagebox.showinfo(message="账号注册成功", title="成功注册新账号！")
+    self.gui.info(message="账号注册成功", title="成功注册新账号！")
     _try_login(self, encode_acount, password, read_json, read_json["passwords"])
     self.log_audit("注册成功", f"注册了账户 {username}")
 
@@ -94,7 +93,7 @@ def _try_login(self, encoded_account, raw_password, read_json, read_passwords):
             pass
 
     if not is_valid:
-        messagebox.showinfo(message="密码错误！", title="密码错误!")
+        self.gui.info(message="密码错误！", title="密码错误!")
         return
 
     # Migrate legacy base64 or unsalted sha256 to salted hash
@@ -130,15 +129,14 @@ def _try_login(self, encoded_account, raw_password, read_json, read_passwords):
     except Exception:
         pass
     try:
-        import ttkbootstrap as ttkbs
-        ttkbs.Style().theme_use(read_settings["theme"])
+        self.gui.set_theme(read_settings["theme"])
     except Exception:
         pass
 
 
 def _delete_the_account(self):
     try:
-        if not messagebox.askyesno(message="确定要注销账号吗？\n你的数据会全部丢失!"):
+        if not self.gui.ask_yes_no(message="确定要注销账号吗？\n你的数据会全部丢失!"):
             return
         read_accounts = load_accounts()
         read_accounts["names"].remove(self.current_acount)
@@ -153,19 +151,19 @@ def _delete_the_account(self):
         self.current_account_label.config(text="当前登录：(未登录)")
         self.if_logged_in = False
         self.welcome_page(destroy_window=[self.settings_frame, "settings"])
-        messagebox.showinfo(message="账户已成功注销!")
+        self.gui.info(message="账户已成功注销!")
         self.log_audit("删除账户", "成功注销并删除了当前账户及其数据")
     except OSError:
-        messagebox.showerror(message="删除文件时出错，可能此文件已经删除,或者权限不足导致无法删除！")
+        self.gui.error(message="删除文件时出错，可能此文件已经删除,或者权限不足导致无法删除！")
     except json.JSONDecodeError:
-        messagebox.showerror(message="解析账户配置文件时出错！请不要随意修改data文件夹的内容！")
+        self.gui.error(message="解析账户配置文件时出错！请不要随意修改data文件夹的内容！")
     except FileNotFoundError:
-        messagebox.showerror(message="无法找到账户配置文件!请不要随意移动data文件夹中的文件!")
+        self.gui.error(message="无法找到账户配置文件!请不要随意移动data文件夹中的文件!")
 
 
 def _reset_account_data(self):
     try:
-        if not messagebox.askyesno(message="确定要重置所有数据吗？\n你的密码会保持不变\n其他数据会全部丢失!"):
+        if not self.gui.ask_yes_no(message="确定要重置所有数据吗？\n你的密码会保持不变\n其他数据会全部丢失!"):
             return
         if os.path.exists(f"./data/{self.current_acount}"):
             shutil.rmtree(f"./data/{self.current_acount}")
@@ -176,10 +174,10 @@ def _reset_account_data(self):
         self.current_account_label.config(text="当前登录：(未登录)")
         self.if_logged_in = False
         self.welcome_page(destroy_window=[self.settings_frame, "settings"])
-        messagebox.showinfo(message="数据已重置，密码保持不变\n请重新登录！")
+        self.gui.info(message="数据已重置，密码保持不变\n请重新登录！")
         self.log_audit("重置数据", "重置了当前账户的所有数据保留密码")
     except OSError:
-        messagebox.showerror(message="删除文件时出错，可能此文件已经删除,或者权限不足导致无法删除！")
+        self.gui.error(message="删除文件时出错，可能此文件已经删除,或者权限不足导致无法删除！")
 
 
 def _logout(self):
@@ -190,5 +188,5 @@ def _logout(self):
         self.welcome_page(destroy_window=[self.settings_frame, "settings"])
     except Exception:
         pass
-    messagebox.showinfo(message="已成功退出登录！")
+    self.gui.info(message="已成功退出登录！")
     self.log_audit("退出登录", "账户正常退出系统")

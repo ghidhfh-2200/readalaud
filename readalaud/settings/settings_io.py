@@ -7,8 +7,6 @@ import base64
 import os
 import secrets
 import tkinter as tk
-from tkinter import messagebox
-import ttkbootstrap as ttkbs
 
 from .tts_settings import save_tts_settings
 
@@ -37,7 +35,7 @@ def _load_settings(self):
         read_settings = DEFAULT_SETTINGS.copy()
         with open(f"./data/{self.current_acount}/settings.json", "w") as f:
             json.dump(read_settings, f)
-        messagebox.showinfo(message="无法找到您的设置文件，已将设置全部重置!")
+        self.gui.info(message="无法找到您的设置文件，已将设置全部重置!")
 
     self.settings_goal_value.set(value=int(read_settings["goal"]) / 60)
     self.settings_stop_dur_value.set(value=read_settings["stop-dur"])
@@ -90,18 +88,14 @@ def _save_settings_except_tts(self, option):
 
 def _popup_auth_confirm(self, option):
     """弹出验证窗口"""
-    dialog = tk.Toplevel(self.main_window)
-    dialog.title("身份验证")
-    dialog.geometry("300x150")
-    dialog.resizable(False, False)
-    dialog.transient(self.main_window)
-    dialog.grab_set()
-
-    # 居中显示
-    dialog.update_idletasks()
-    px = self.main_window.winfo_rootx() + (self.main_window.winfo_width() - 300) // 2
-    py = self.main_window.winfo_rooty() + (self.main_window.winfo_height() - 150) // 2
-    dialog.geometry(f"+{max(0, px)}+{max(0, py)}")
+    dialog = self.gui.create_toplevel(
+        title="身份验证",
+        size=(300, 150),
+        parent=self.main_window,
+        resizable=(False, False),
+        modal=True,
+        center=True,
+    )
 
     tk.Label(dialog, text="请输入当前账号密码以继续：", font=("微软雅黑", 10)).pack(pady=10)
     pwd_var = tk.StringVar()
@@ -112,7 +106,7 @@ def _popup_auth_confirm(self, option):
     def on_confirm(event=None):
         pwd = pwd_var.get()
         if not pwd:
-            messagebox.showwarning("提示", "密码不能为空", parent=dialog)
+            self.gui.warning("密码不能为空", title="提示", parent=dialog)
             return
         
         # 验证密码
@@ -123,7 +117,7 @@ def _popup_auth_confirm(self, option):
             elif option == "password":
                 _save_password(self)
         else:
-            messagebox.showerror("认证失败", "密码错误", parent=dialog)
+            self.gui.error("密码错误", title="认证失败", parent=dialog)
             self.log_audit("敏感操作认证失败", f"尝试进行 {option} 修改时密码验证失败")
 
     btn = tk.Button(dialog, text="验证", command=on_confirm, width=10)
@@ -172,7 +166,7 @@ def _save_account_name(self):
         self.current_account_label.config(
             text=f"当前登录：{base64.urlsafe_b64decode(self.current_acount).decode('utf-8')}"
         )
-        messagebox.showinfo(message="账户名称修改成功！")
+        self.gui.info(message="账户名称修改成功！")
         self.log_operation("修改账户名", "账户名称已被更改")
     except FileNotFoundError:
         with open("./data/acounts.json", "w") as f:
@@ -180,13 +174,13 @@ def _save_account_name(self):
         self.current_acount = ""
         self.if_logged_in = False
         self.welcome_page(destroy_window=self.settings_frame)
-        messagebox.showinfo(message="无法找到账户配置文件，已自动重置\n请清空data文件夹中的子文件夹\n重新注册账号！")
+        self.gui.info(message="无法找到账户配置文件，已自动重置\n请清空data文件夹中的子文件夹\n重新注册账号！")
 
 
 def _save_password(self):
     new_password = self.settings_password_value.get()
     if not new_password:
-        messagebox.showwarning(message="新密码不能为空!")
+        self.gui.warning(message="新密码不能为空!")
         return
     
     try:
@@ -202,14 +196,14 @@ def _save_password(self):
             json.dump(read_accounts, f)
         
         self.settings_password_value.set("")
-        messagebox.showinfo(message="密码修改成功!")
+        self.gui.info(message="密码修改成功!")
         self.log_audit("敏感操作成功", "通过验证后成功修改了账户密码")
     except FileNotFoundError:
         with open("./data/acounts.json", "w") as f:
             json.dump({"names": [], "passwords": {}}, f)
-        messagebox.showinfo(message="无法找到账户配置文件，已自动重置\n请清空data文件夹中的子文件夹\n重新注册账号！")
+        self.gui.info(message="无法找到账户配置文件，已自动重置\n请清空data文件夹中的子文件夹\n重新注册账号！")
     except json.JSONDecodeError:
-        messagebox.showinfo(message="账户文件解析失败！")
+        self.gui.info(message="账户文件解析失败！")
 
 
 def _save_goal(self):
@@ -225,7 +219,7 @@ def _save_stop_dur(self):
 def _save_db_level(self):
     new_db_level = self.settings_db_value.get()
     if new_db_level < 0:
-        messagebox.showerror(message="分贝值不能小于0！\n建议阈值为30dB左右")
+        self.gui.error(message="分贝值不能小于0！\n建议阈值为30dB左右")
         return
     _write_single_setting(self, "db-level", new_db_level, "声音阈值修改成功！")
 
@@ -238,22 +232,27 @@ def _write_single_setting(self, key, value, success_msg):
         read_settings[key] = value
         with open(settings_path, "w") as f:
             json.dump(read_settings, f)
-        messagebox.showinfo(message=success_msg)
+        self.gui.info(message=success_msg)
         self.log_operation("修改设置", f"修改了设置项: {key} 为 {value}")
     except FileNotFoundError:
         with open(settings_path, "w") as f:
             json.dump(DEFAULT_SETTINGS.copy(), f)
-        messagebox.showinfo(message="无法找到你的设置文件！\n已自动重置，请重新完成所有设置!")
+        self.gui.info(message="无法找到你的设置文件！\n已自动重置，请重新完成所有设置!")
     except json.JSONDecodeError:
-        messagebox.showerror(message="设置文件解析失败！\n请不要随意修改data文件夹中的文件！")
+        self.gui.error(message="设置文件解析失败！\n请不要随意修改data文件夹中的文件！")
 
 
 # ── 主题切换 ──────────────────────────────────────────────
 
 def _change_theme(self):
     try:
-        get_selected = self.customize_listbox.get(self.customize_listbox.curselection())
-        ttkbs.Style().theme_use(get_selected)
+        selection = self.customize_listbox.curselection()
+        if not selection:
+            self.gui.error(message="请先选择一个样式")
+            return
+
+        get_selected = self.customize_listbox.get(selection[0])
+        self.gui.set_theme(get_selected)
         settings_path = f"./data/{self.current_acount}/settings.json"
         with open(settings_path, "r") as f:
             read_settings = json.load(f)
@@ -261,4 +260,4 @@ def _change_theme(self):
         with open(settings_path, "w") as f:
             json.dump(read_settings, f)
     except tk.TclError:
-        messagebox.showerror(message="请选择一个主题！")
+        self.gui.error(message="请先选择一个样式")

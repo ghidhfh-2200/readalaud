@@ -3,7 +3,6 @@ tts_settings.py —— TTS 语音提示配置的保存与缓存清理。
 """
 import json
 import os
-from tkinter import messagebox
 
 DEFAULT_SETTINGS = {"goal": 0, "stop-dur": 0, "db-level": 0, "calibration": 94, "theme": "darkly", "if_tts": 0}
 
@@ -40,9 +39,9 @@ def save_tts_settings(self, args):
         settings_path = f"./data/{self.current_acount}/settings.json"
         with open(settings_path, "w") as f:
             json.dump(DEFAULT_SETTINGS.copy(), f)
-        messagebox.showinfo(message="无法找到你的设置文件！\n已自动重置，请重新完成所有设置!")
+        self.gui.info(message="无法找到你的设置文件！\n已自动重置，请重新完成所有设置!")
     except json.JSONDecodeError:
-        messagebox.showerror(message="设置文件解析失败！\n请不要随意修改data文件夹中的文件！")
+        self.gui.error(message="设置文件解析失败！\n请不要随意修改data文件夹中的文件！")
 
 
 def _clean_outdated_tts_cache(self, new_config):

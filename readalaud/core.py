@@ -7,6 +7,7 @@ from .audio import bind_audio_analasy_api
 from .calibration import bind_calibration_api
 from .server import bind_server_api, bind_server_manager_api
 from .logger import bind_logger_api, init_db
+from .gui.gui_service import get_gui_service
 
 
 class ReadAlaud:
@@ -29,11 +30,14 @@ class ReadAlaud:
         self.if_time_and_text_config_popup = False
         self.if_reading = False
         self.if_audio_analysis_running = False
+        # backward-compatibility: historical typo used in data_gui
+        self.if_audio_analasy_running = False
 
         self.font = ("微软雅黑", 17)
         self.mainpage_button_font = ("微软雅黑", 12)
         self.all_web_voices = None
         self.all_local_voices = None
+        self.gui = get_gui_service(self)
 
         # 绑定模块方法到实例上
         gui.bind_gui(self)

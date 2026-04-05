@@ -7,7 +7,7 @@ import platform
 import threading
 import re
 import tkinter as tk
-from tkinter import messagebox
+from ..gui.gui_service import get_gui_service
 
 from .process_manager import check_if_server_running, server_pid, end_server_process
 
@@ -16,15 +16,15 @@ from .process_manager import check_if_server_running, server_pid, end_server_pro
 
 def _start_server_op():
     if check_if_server_running():
-        messagebox.showinfo("提示", "服务器已经在运行中")
+        get_gui_service().info("服务器已经在运行中", title="提示")
         return
     try:
         cmd = [sys.executable, "-c", "from readalaud.server import start_socket_server; start_socket_server()"]
         creationflags = subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0
         subprocess.Popen(cmd, creationflags=creationflags)
-        messagebox.showinfo("提示", "已发送启动指令，请稍候...")
+        get_gui_service().info("已发送启动指令，请稍候...", title="提示")
     except Exception as e:
-        messagebox.showerror("错误", f"无法启动: {e}")
+        get_gui_service().error(f"无法启动: {e}", title="错误")
 
 
 def _shutdown_server_op():
@@ -32,17 +32,17 @@ def _shutdown_server_op():
     if pid:
         res = end_server_process(pid=pid, force=True)
         if res == "suc":
-            messagebox.showinfo("提示", "服务器已关闭")
+            get_gui_service().info("服务器已关闭", title="提示")
         else:
-            messagebox.showerror("错误", f"关闭失败: {res}")
+            get_gui_service().error(f"关闭失败: {res}", title="错误")
     else:
-        messagebox.showinfo("提示", "服务器未运行")
+        get_gui_service().info("服务器未运行", title="提示")
 
 
 def _kill_selected_task_op(listbox):
     selection = listbox.curselection()
     if not selection:
-        messagebox.showinfo("提示", "请选择一个进程")
+        get_gui_service().info("请选择一个进程", title="提示")
         return
     item = listbox.get(selection[0])
     match = re.search(r"PID:\s*(\d+)", item)
@@ -50,9 +50,9 @@ def _kill_selected_task_op(listbox):
         pid = int(match.group(1))
         res = end_server_process(force=True, pid=pid)
         if res == "suc":
-            messagebox.showinfo("成功", f"进程 {pid} 已结束")
+            get_gui_service().info(f"进程 {pid} 已结束", title="成功")
         else:
-            messagebox.showerror("失败", f"无法结束进程: {res}")
+            get_gui_service().error(f"无法结束进程: {res}", title="失败")
 
 
 # ── 滚动检查线程 ─────────────────────────────────────────
@@ -109,13 +109,20 @@ def _on_exit(event, root):
 # ── 主窗口 ───────────────────────────────────────────────
 
 def start_manager(self=None):
+    gui = get_gui_service(self)
     if self is not None:
-        server_manager_window = tk.Toplevel(master=self.main_window)
+        server_manager_window = gui.create_toplevel(
+            title="服务器管理",
+            size=(300, 400),
+            parent=self.main_window,
+            resizable=(True, True),
+            modal=False,
+            center=True,
+        )
     else:
         server_manager_window = tk.Tk()
-
-    server_manager_window.title("服务器管理")
-    server_manager_window.geometry("300x400")
+        server_manager_window.title("服务器管理")
+        server_manager_window.geometry("300x400")
 
     state_label_frame = tk.LabelFrame(master=server_manager_window, width=270, height=30, border=1, text="服务器状态")
     state_label_frame.pack(padx=5, pady=5, fill="x")

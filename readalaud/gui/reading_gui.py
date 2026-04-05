@@ -3,7 +3,6 @@
 """
 
 import tkinter as tk
-from tkinter import messagebox
 from ..reading import reading_data_get_and_check, start_reading
 
 
@@ -95,7 +94,7 @@ def _start_reading(self):
 
 def _reading_back(self):
     if self.if_reading == True:
-        messagebox.showinfo(
+        self.gui.info(
             title="无法退出！",
             message="当前朗读正在进行中，请勿退出朗读界面\n否则可能导致界面更新错误!",
         )

@@ -2,16 +2,17 @@ import tkinter as tk
 from tkinter import ttk
 from datetime import datetime
 from .log_manager import get_logs, get_available_months
+from ..gui.gui_service import get_gui_service
 
 def show_log_viewer(self):
-    viewer = tk.Toplevel(self.main_window)
-    viewer.title("系统日志查看器 (System Log Viewer)")
-    viewer.geometry("900x500")
-    # 居中显示
-    viewer.update_idletasks()
-    px = self.main_window.winfo_rootx() + (self.main_window.winfo_width() - 900) // 2
-    py = self.main_window.winfo_rooty() + (self.main_window.winfo_height() - 500) // 2
-    viewer.geometry(f"+{max(0, px)}+{max(0, py)}")
+    viewer = get_gui_service(self).create_toplevel(
+        title="系统日志查看器 (System Log Viewer)",
+        size=(900, 500),
+        parent=self.main_window,
+        resizable=(True, True),
+        modal=False,
+        center=True,
+    )
 
     # 顶部控制区
     ctrl_frame = tk.Frame(viewer)

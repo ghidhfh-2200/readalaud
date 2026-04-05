@@ -13,6 +13,7 @@ import threading
 from datetime import datetime, timedelta
 from PIL import Image, ImageTk
 from .. import audio_analysis as audio_analasy
+from .gui_service import get_gui_service
 
 
 # ══════════════════════════════════════════════════════════
@@ -64,6 +65,7 @@ def _generate_data_gui(self):
             master=self.data_frame, text="返回", font=self.mainpage_button_font,
             command=lambda: [
                 self.welcome_page(destroy_window=[self.data_frame, "data_form"]),
+                setattr(self, 'if_audio_analysis_running', False),
                 setattr(self, 'if_audio_analasy_running', False),
             ],
         ),
@@ -516,6 +518,7 @@ def _build_day_tab(self, day_frame, register_component):
             command=lambda: [
                 self.day_analysis_container.pack_forget(),
                 self.day_detail_container.pack(fill="both", expand=True),
+                setattr(self, 'if_audio_analysis_running', False),
                 setattr(self, 'if_audio_analasy_running', False)
             ],
         )
@@ -636,18 +639,14 @@ def _build_day_tab(self, day_frame, register_component):
 
 def _show_analysis_dialog(self):
     """弹出复选框对话框，让用户选择要执行的音频分析项目。"""
-    dialog = tk.Toplevel(self.main_window)
-    dialog.title("选择音频分析项目")
-    dialog.geometry("420x560")
-    dialog.resizable(False, True)
-    dialog.transient(self.main_window)
-    dialog.grab_set()
-
-    # 居中于主窗口
-    dialog.update_idletasks()
-    px = self.main_window.winfo_rootx() + (self.main_window.winfo_width() - 420) // 2
-    py = self.main_window.winfo_rooty() + (self.main_window.winfo_height() - 560) // 2
-    dialog.geometry(f"+{max(0, px)}+{max(0, py)}")
+    dialog = get_gui_service(self).create_toplevel(
+        title="选择音频分析项目",
+        size=(420, 560),
+        parent=self.main_window,
+        resizable=(False, True),
+        modal=True,
+        center=True,
+    )
 
     tk.Label(
         dialog, text="请勾选需要分析的项目：", font=("微软雅黑", 11)
@@ -768,8 +767,9 @@ def _start_audio_analysis(self, selected_keys):
     output_dir = os.path.join("./details", account, str(date_str))
 
     def _bg_worker():
-        if self.if_audio_analasy_running==True:
+        if getattr(self, "if_audio_analysis_running", False) == True:
             return
+        self.if_audio_analysis_running = True
         self.if_audio_analasy_running = True
         time.sleep(0.2)  # 等待 GUI 渲染完成
 

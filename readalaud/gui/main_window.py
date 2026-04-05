@@ -3,9 +3,7 @@
 """
 
 import tkinter as tk
-from tkinter import messagebox
 import base64
-import ttkbootstrap as ttkbs
 from ..calibration import start_calibration
 from ..server import check_if_server_running, server_pid, end_server_process, start_manager
 
@@ -22,7 +20,7 @@ def _generate_main_window(self):
     self.content = ""
     self.main_window.geometry("800x600")
     self.main_window.title("ReadAlaud——告别摸鱼偷懒，回归大声早读！")
-    ttkbs.Style().theme_use(themename="darkly")
+    self.gui.set_theme("darkly")
     # create a horizontal PanedWindow
     self.main_paned_window = tk.PanedWindow(
         self.main_window, orient=tk.HORIZONTAL, showhandle=True, sashrelief="sunken"
@@ -64,18 +62,18 @@ def check_if_reading(self):
         # 双重检查：确认服务器确实还在运行
         server_running = check_if_server_running()
         if server_running:
-            messagebox.showinfo(title="无法关闭", message="当前正在朗读，请结束朗读后再关闭主窗口！")
+            self.gui.info(title="无法关闭", message="当前正在朗读，请结束朗读后再关闭主窗口！")
         else:
             # 服务器已经不在运行，重置朗读状态
             self.if_reading = False
-            if_exit = messagebox.askyesno(title="确定要关闭吗？", message="朗读服务器已停止。确认要关闭吗?")
+            if_exit = self.gui.ask_yes_no(title="确定要关闭吗？", message="朗读服务器已停止。确认要关闭吗?")
             if if_exit:
                 self.main_window.destroy()
     else:
         # 检查服务器是否仍在后台运行
         server_running = check_if_server_running()
         if server_running:
-            action = messagebox.askyesnocancel(
+            action = self.gui.ask_yes_no_cancel(
                 title="服务器仍在运行",
                 message="检测到朗读服务器仍在后台运行。\n\n是 - 关闭服务器并退出\n否 - 保留服务器并退出\n取消 - 返回"
             )
@@ -90,7 +88,7 @@ def check_if_reading(self):
                 self.main_window.destroy()
             # action is None (取消): 不做任何事
         else:
-            if_exit = messagebox.askyesno(title="确定要关闭吗？", message="确认要关闭吗?")
+            if_exit = self.gui.ask_yes_no(title="确定要关闭吗？", message="确认要关闭吗?")
             if if_exit:
                 self.main_window.destroy()
 
@@ -118,8 +116,8 @@ def _welcome_page(self, destroy_window):
         font=self.font,
     )
     title.pack(expand=True, fill=tk.BOTH)
-    if self.if_logged_in == False and ttkbs.Style().theme_use() != "darkly":
-        ttkbs.Style().theme_use("darkly")
+    if self.if_logged_in == False and self.gui.get_theme() != "darkly":
+        self.gui.set_theme("darkly")
     if self.if_logged_in == True:
         try:
             self.current_account_label.config(
