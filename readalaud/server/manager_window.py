@@ -121,6 +121,10 @@ def start_manager(self=None):
         )
     else:
         server_manager_window = tk.Tk()
+        try:
+            server_manager_window.iconbitmap("./assets/icon.ico")
+        except Exception:
+            pass
         server_manager_window.title("服务器管理")
         server_manager_window.geometry("300x400")
 

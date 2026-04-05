@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+    <defs>
+        <!-- Background Gradient -->
+        <linearGradient id="bg-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#1E2028"/>
+            <stop offset="100%" stop-color="#2D3245"/>
+        </linearGradient>
+        
+        <!-- Sound Wave Gradient (Cyan to Light Blue) -->
+        <linearGradient id="wave-grad" x1="0%" y1="100%" x2="50%" y2="0%">
+            <stop offset="0%" stop-color="#00F2FE"/>
+            <stop offset="100%" stop-color="#4FACFE"/>
+        </linearGradient>
+        
+        <!-- Book Gradient (Soft White to Light Gray) -->
+        <linearGradient id="book-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#F8FAFC"/>
+            <stop offset="100%" stop-color="#DEE2E6"/>
+        </linearGradient>
+        
+        <!-- Glow Filters for Neon Effect -->
+        <filter id="glow-wave" x="-30%" y="-30%" width="160%" height="160%">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="12" result="blur"/>
+            <feMerge>
+                <feMergeNode in="blur"/>
+                <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+        </filter>
+        
+        <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="5" result="blur"/>
+            <feMerge>
+                <feMergeNode in="blur"/>
+                <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+        </filter>
+    </defs>
+    
+    <!-- Background Squircle (Apple-like rounded rectangle) for App Icon Look -->
+    <rect width="512" height="512" rx="112" fill="url(#bg-grad)"/>
+    
+    <!-- Book Icon Outline -->
+    <g stroke="url(#book-grad)" stroke-width="28" stroke-linecap="round" stroke-linejoin="round" fill="none">
+        <!-- Left Book Page -->
+        <path d="M256 410 V230 C190 190 120 190 86 215 V395 C120 370 190 370 256 410 Z"/>
+        <!-- Right Book Page -->
+        <path d="M256 410 V230 C322 190 392 190 426 215 V395 C392 370 322 370 256 410 Z"/>
+        <!-- Center line accent (spine crease) -->
+        <line x1="256" y1="230" x2="256" y2="410" stroke-width="14" stroke="#8B9BB4"/>
+    </g>
+
+    <!-- Sound Waves (Floating above the book) to symbolize Reading Aloud and Audio Analysis -->
+    <g fill="url(#wave-grad)" filter="url(#glow-wave)">
+        <!-- Center wave -->
+        <rect x="238" y="70" width="36" height="130" rx="18"/>
+        <!-- Inner Left -->
+        <rect x="188" y="90" width="32" height="90" rx="16"/>
+        <!-- Inner Right -->
+        <rect x="292" y="90" width="32" height="90" rx="16"/>
+        <!-- Outer Left -->
+        <rect x="138" y="110" width="28" height="50" rx="14"/>
+        <!-- Outer Right -->
+        <rect x="346" y="110" width="28" height="50" rx="14"/>
+    </g>
+
+    <!-- Sparks/Energy Dots to convey morning reading energy -->
+    <g filter="url(#glow)">
+        <!-- Yellow Spark -->
+        <circle cx="130" cy="80" r="8" fill="#FFC107"/>
+        <!-- Orange/Red Spark -->
+        <circle cx="400" cy="110" r="6" fill="#FF512F"/>
+        <!-- Teal Spark -->
+        <circle cx="340" cy="50" r="10" fill="#00F2FE"/>
+    </g>
+</svg>

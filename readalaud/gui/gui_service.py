@@ -61,6 +61,10 @@ class GUIService:
         master = self._parent(parent)
         window = tk.Toplevel(master=master) if master is not None else tk.Toplevel()
         window.title(title)
+        try:
+            window.iconbitmap("./assets/icon.ico")
+        except Exception:
+            pass
         if size:
             width, height = size
             window.geometry(f"{width}x{height}")

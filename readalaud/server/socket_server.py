@@ -4,11 +4,15 @@ socket_server.py —— FastAPI HTTP 端点 + WebSocket 音频流接收。
 import fastapi
 import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from fastapi.websockets import WebSocket
 import json
 import pathlib
 import wave
 import os
+import mimetypes
+mimetypes.add_type('text/css', '.css')
+mimetypes.add_type('application/javascript', '.js')
 
 
 def bind_server_api(instance):
@@ -25,6 +29,12 @@ def start_socket_server(queue=None):
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    project_root = pathlib.Path(__file__).resolve().parent.parent.parent
+    web_dir = project_root / "web"
+    if web_dir.exists():
+        # 挂载后，比如通过 http://127.0.0.1:8008/web/audio_visualizer.html 即可访问静态文件
+        fast_server.mount("/web", StaticFiles(directory=str(web_dir), html=True), name="web")
 
     last_state = {}
 

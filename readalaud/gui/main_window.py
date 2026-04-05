@@ -12,6 +12,10 @@ from ..server import check_if_server_running, server_pid, end_server_process, st
 
 def _generate_main_window(self):
     self.main_window = tk.Tk()
+    try:
+        self.main_window.iconbitmap("./assets/icon.ico")
+    except Exception:
+        pass
     # create StringVar instances after the root exists
     if getattr(self, 'login_password_enter', None) is None:
         self.login_password_enter = tk.StringVar()

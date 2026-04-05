@@ -140,23 +140,23 @@ def reading_data_get_and_check(self):
 # ── 网页打开 ─────────────────────────────────────────────
 
 def start_webpage():
-    abs_path = pathlib.Path(__file__).resolve()
-    parent_path = abs_path.parent.parent.parent
-    file_path = str(parent_path / "web" / "audio_visualizer.html")
+    url = "http://127.0.0.1:8008/web/audio_visualizer.html"
     try:
-        if platform.system() == "Windows":
-            os.startfile(file_path)
-        elif platform.system() == "Linux":
-            subprocess.call(["xdg-open", file_path])
-        elif platform.system() == "Darwin":
-            subprocess.call(["open", file_path])
-        else:
+        import webbrowser
+        opened = webbrowser.open(url)
+        if not opened:
+            root = tk.Tk()
+            root.withdraw()
+            root.clipboard_clear()
+            root.clipboard_append(url)
+            root.update()
             get_gui_service().error(
-                "您当前操作系统不支持自动打开朗读界面！\n请手动在浏览器打开web目录下的audio_visualizer.html文件",
+                f"无法自动打开浏览器！\n已成功自动复制链接到剪贴板，请手动去浏览器中粘贴访问：\n{url}",
                 title="不支持",
             )
+            root.destroy()
     except Exception as e:
-        log(f"打开文件失败: {e}")
+        log(f"打开网页失败: {e}")
 
 
 # ── 朗读启动 ─────────────────────────────────────────────
@@ -191,7 +191,7 @@ def start_reading(self):
         time.sleep(0.2)
 
     if server_running:
-        ask_restart = self.gui.ask_yes_no(message="服务器正在运行！此操作将会重启服务器，确定继续？")
+        ask_restart = self.gui.ask_yes_no(message="服务器正在运行！是否重启服务器？")
         if ask_restart:
             self.if_reading = True
             log("发现僵尸服务器进程，正在尝试清除！", self=self)
