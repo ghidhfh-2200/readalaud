@@ -11,6 +11,7 @@ import urllib.request
 from .data_io import write_db_data
 from .wav_merger import merge_wav
 from .tts_trigger import check_tts_conditions
+from ..logger.log_manager import log_system
 
 
 def _poll_server_http(url="http://127.0.0.1:8008/poll", timeout=2):
@@ -23,6 +24,7 @@ def _poll_server_http(url="http://127.0.0.1:8008/poll", timeout=2):
 
 
 def data_thread(ipc_queue, ui_queue, instance):
+    instance.log_operation("启动数据线程", f"ipc_queue={'on' if ipc_queue is not None else 'off'}")
     write_count = 0
     db_list = []
     last_process_time = time.time()
@@ -41,6 +43,7 @@ def data_thread(ipc_queue, ui_queue, instance):
             if "broadcast" in initial_poll:
                 last_poll_broadcast = initial_poll["broadcast"]
         print("[data_thread] HTTP polling mode started, baseline state cleared.", flush=True)
+        instance.log_operation("数据线程降级模式", "使用 HTTP 轮询替代 IPC")
 
     while getattr(instance, "if_reading", True):
         try:
@@ -159,6 +162,7 @@ def data_thread(ipc_queue, ui_queue, instance):
                 ui_queue.put(update_payload)
 
             if "end_sig" in data:
+                instance.log_operation("收到结束信号", "准备写回日统计与合并音频")
                 instance.if_reading = False
                 ui_queue.put({"type": "stop"})
                 current_account = getattr(instance, "current_acount")
@@ -178,6 +182,7 @@ def data_thread(ipc_queue, ui_queue, instance):
                 time.sleep(2)
                 list_chunks = os.listdir("./audio_chunks")
                 merge_wav(list_chunks, f"./details/{current_account}/{get_date}/recording.wav")
+                instance.log_operation("朗读数据落盘完成", f"date={get_date}, chunks={len(list_chunks)}")
                 try:
                     shutil.rmtree("./audio_chunks")
                 except FileNotFoundError:
@@ -185,5 +190,9 @@ def data_thread(ipc_queue, ui_queue, instance):
                 break
 
         except Exception as e:
+            instance.log_error("数据线程异常", str(e))
+            log_system("data_thread 崩溃", str(e))
             print(f"Error in data_thread: {e}")
             break
+
+    instance.log_operation("数据线程退出", "data_thread loop ended")

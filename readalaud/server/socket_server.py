@@ -12,6 +12,7 @@ import pathlib
 import wave
 import os
 import mimetypes
+from ..logger.log_manager import log_system
 mimetypes.add_type('text/css', '.css')
 mimetypes.add_type('application/javascript', '.js')
 
@@ -21,6 +22,7 @@ def bind_server_api(instance):
 
 
 def start_socket_server(queue=None):
+    log_system("启动 Socket 服务器", "start_socket_server called")
     fast_server = fastapi.FastAPI(debug=False, redoc_url=None, docs_url=None)
     project_root = pathlib.Path(__file__).resolve().parent.parent.parent
     web_dir = project_root / "web"
@@ -36,6 +38,7 @@ def start_socket_server(queue=None):
     if web_dir.exists():
         # 挂载后，比如通过 http://127.0.0.1:8008/web/audio_visualizer.html 即可访问静态文件
         fast_server.mount("/web", StaticFiles(directory=str(web_dir), html=True), name="web")
+        log_system("挂载静态目录", str(web_dir))
 
     @fast_server.get("/bootstrap.min.css", include_in_schema=False)
     async def bootstrap_css():
@@ -55,6 +58,7 @@ def start_socket_server(queue=None):
                 queue.put({"broadcast": data})
             return {"message": "ok"}
         except Exception as e:
+            log_system("/get_state 异常", str(e))
             print(e)
             return {"message": "err: " + str(e)}
 
@@ -67,12 +71,14 @@ def start_socket_server(queue=None):
                 read_data = json.load(f)
             return read_data
         except Exception as e:
+            log_system("/get_temp 异常", str(e))
             print(e)
             return {"message": "err: " + str(e)}
 
     @fast_server.post("/end_reading")
     async def end_reading():
         print("get_ended")
+        log_system("收到结束朗读请求", "POST /end_reading")
         last_state["end_sig"] = True
         if queue is not None:
             queue.put({"end_sig": True})
@@ -86,12 +92,14 @@ def start_socket_server(queue=None):
                 del last_state["end_sig"]
             return result
         except Exception as e:
+            log_system("/poll 异常", str(e))
             print(e)
             return {"message": "err: " + str(e)}
 
     @fast_server.websocket("/audio_stream")
     async def audio_receive(websocket: WebSocket):
         await websocket.accept()
+        log_system("音频 WebSocket 已连接", "/audio_stream accepted")
 
         SAMPLE_RATE = 44100
         CHANNELS = 1
@@ -132,6 +140,7 @@ def start_socket_server(queue=None):
                     del current_buffer[:BYTES_PER_CHUNK]
                     chunk_index += 1
         except Exception as e:
+            log_system("音频 WebSocket 连接关闭", str(e))
             print(f"WebSocket connection closed: {e}")
         finally:
             if len(current_buffer) > 0:
@@ -142,9 +151,11 @@ def start_socket_server(queue=None):
                     wav_file.setframerate(SAMPLE_RATE)
                     wav_file.writeframes(current_buffer)
                 print(f"Saved final chunk: {output_file}")
+                log_system("保存最后音频分块", str(output_file))
             try:
                 await websocket.close()
             except Exception:
                 pass
 
+    log_system("运行 Uvicorn", "127.0.0.1:8008")
     uvicorn.run(app=fast_server, host="127.0.0.1", port=8008, limit_concurrency=20)

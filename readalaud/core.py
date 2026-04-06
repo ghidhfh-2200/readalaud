@@ -17,6 +17,11 @@ class ReadAlaud:
 
     def __init__(self):
         init_db()  # 初始化日志数据库
+        try:
+            from .logger.log_manager import log_system
+            log_system("初始化核心对象", "ReadAlaud.__init__ start")
+        except Exception:
+            pass
         # 状态变量
         self.if_main_window_show = True
         self.if_settings_show = False
@@ -50,6 +55,7 @@ class ReadAlaud:
         bind_server_api(self)
         bind_server_manager_api(self)
         bind_logger_api(self)
+        self.log_operation("模块绑定完成", "auth/settings/tts/reading/audio/calibration/server/logger")
         # login StringVars will be created when the GUI root exists (in _generate_main_window)
         self.login_password_enter = None
         self.login_acount_enter = None

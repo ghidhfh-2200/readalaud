@@ -36,13 +36,28 @@ def add_log(account, log_type, action, details=""):
     except Exception as e:
         print(f"Failed to write log: {e}")
 
+
+def _decode_account_safe(account):
+    if not account:
+        return "SYSTEM"
+    try:
+        return base64.urlsafe_b64decode(account).decode("utf-8")
+    except Exception:
+        return str(account)
+
 def log_audit(account, action, details=""):
-    account = base64.urlsafe_b64decode(account).decode("utf-8")
-    add_log(account, "AUDIT", action, details)
+    add_log(_decode_account_safe(account), "AUDIT", action, details)
 
 def log_operation(account, action, details=""):
-    account = base64.urlsafe_b64decode(account).decode("utf-8")
-    add_log(account, "OPERATION", action, details)
+    add_log(_decode_account_safe(account), "OPERATION", action, details)
+
+
+def log_error(account, action, details=""):
+    add_log(_decode_account_safe(account), "OPERATION", f"ERROR:{action}", details)
+
+
+def log_system(action, details=""):
+    add_log("SYSTEM", "OPERATION", action, details)
 
 def get_logs(log_type=None, month=None, limit=1000):
     try:

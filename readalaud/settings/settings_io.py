@@ -23,11 +23,13 @@ def bind_settings(instance):
 # ── 读取设置 ──────────────────────────────────────────────
 
 def _load_settings(self):
+    self.log_operation("调用加载设置", "执行 load_settings")
     current_account = self.current_acount
     try:
         with open(f"./data/{current_account}/settings.json", "r") as f:
             read_settings = json.load(f)
     except FileNotFoundError:
+        self.log_error("加载设置失败", "settings.json 不存在，准备自动重建")
         try:
             os.makedirs(f"./data/{current_account}")
         except FileExistsError:
@@ -65,12 +67,14 @@ def _load_settings(self):
                     elif key == "source":    source = values
                 self.tts_tree.insert("", tk.END, values=(f"{condition} {value}", text, rate, volume, voice, source))
         except Exception:
+            self.log_error("加载 TTS 设置失败", "tts_config.json 不可读或格式错误")
             pass
 
 
 # ── 保存各项设置 ──────────────────────────────────────────
 
 def _save_settings_except_tts(self, option):
+    self.log_operation("调用保存设置", f"option={option}")
     # 对于敏感操作（修改账号名、修改密码），先弹出确认框验证身份
     if option in ["account", "password"]:
         _popup_auth_confirm(self, option)
@@ -106,6 +110,7 @@ def _popup_auth_confirm(self, option):
     def on_confirm(event=None):
         pwd = pwd_var.get()
         if not pwd:
+            self.log_error("敏感操作认证失败", "密码为空")
             self.gui.warning("密码不能为空", title="提示", parent=dialog)
             return
         
@@ -151,6 +156,7 @@ def _verify_current_password(self, input_pwd):
 
 
 def _save_account_name(self):
+    self.log_operation("调用修改账户名", "执行 _save_account_name")
     new_name = base64.urlsafe_b64encode(self.settings_name_value.get().encode("utf-8")).decode("utf-8")
     try:
         with open("./data/acounts.json", "r") as f:
@@ -169,6 +175,7 @@ def _save_account_name(self):
         self.gui.info(message="账户名称修改成功！")
         self.log_operation("修改账户名", "账户名称已被更改")
     except FileNotFoundError:
+        self.log_error("修改账户名失败", "acounts.json 不存在，已重置")
         with open("./data/acounts.json", "w") as f:
             json.dump({"names": [], "passwords": {}}, f)
         self.current_acount = ""
@@ -178,8 +185,10 @@ def _save_account_name(self):
 
 
 def _save_password(self):
+    self.log_operation("调用修改密码", "执行 _save_password")
     new_password = self.settings_password_value.get()
     if not new_password:
+        self.log_error("修改密码失败", "新密码为空")
         self.gui.warning(message="新密码不能为空!")
         return
     
@@ -199,10 +208,12 @@ def _save_password(self):
         self.gui.info(message="密码修改成功!")
         self.log_audit("敏感操作成功", "通过验证后成功修改了账户密码")
     except FileNotFoundError:
+        self.log_error("修改密码失败", "acounts.json 不存在，已重置")
         with open("./data/acounts.json", "w") as f:
             json.dump({"names": [], "passwords": {}}, f)
         self.gui.info(message="无法找到账户配置文件，已自动重置\n请清空data文件夹中的子文件夹\n重新注册账号！")
     except json.JSONDecodeError:
+        self.log_error("修改密码失败", "acounts.json JSON 解析失败")
         self.gui.info(message="账户文件解析失败！")
 
 
@@ -235,19 +246,23 @@ def _write_single_setting(self, key, value, success_msg):
         self.gui.info(message=success_msg)
         self.log_operation("修改设置", f"修改了设置项: {key} 为 {value}")
     except FileNotFoundError:
+        self.log_error("保存设置失败", f"{key} 写入失败，settings.json 不存在")
         with open(settings_path, "w") as f:
             json.dump(DEFAULT_SETTINGS.copy(), f)
         self.gui.info(message="无法找到你的设置文件！\n已自动重置，请重新完成所有设置!")
     except json.JSONDecodeError:
+        self.log_error("保存设置失败", f"{key} 写入失败，JSON 解析错误")
         self.gui.error(message="设置文件解析失败！\n请不要随意修改data文件夹中的文件！")
 
 
 # ── 主题切换 ──────────────────────────────────────────────
 
 def _change_theme(self):
+    self.log_operation("调用主题切换", "执行 change_theme")
     try:
         selection = self.customize_listbox.curselection()
         if not selection:
+            self.log_error("主题切换失败", "未选择主题")
             self.gui.error(message="请先选择一个样式")
             return
 
@@ -260,4 +275,5 @@ def _change_theme(self):
         with open(settings_path, "w") as f:
             json.dump(read_settings, f)
     except tk.TclError:
+        self.log_error("主题切换失败", "Tk 组件状态异常")
         self.gui.error(message="请先选择一个样式")

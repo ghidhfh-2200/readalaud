@@ -4,12 +4,15 @@ import traceback
 from pathlib import Path
 
 import tkinter as tk
+from readalaud.logger.log_manager import init_db, log_system
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 ICON_PATH = PROJECT_ROOT / "assets" / "icon.ico"
 
 def show_splash_and_start():
+    init_db()
+    log_system("启动程序", "show_splash_and_start")
     splash = tk.Tk()
     splash.overrideredirect(True)
     splash.title("正在启动...")
@@ -43,6 +46,7 @@ def show_splash_and_start():
             raise FileNotFoundError(f"找不到启动图标：{ICON_PATH}")
         label.pack(fill="both", expand=True)
     except Exception as e:
+        log_system("加载启动图标失败", str(e))
         # 如果加载失败则显示文本
         label = tk.Label(
             splash,
@@ -71,6 +75,7 @@ def show_splash_and_start():
 
             app = ReadAlaud()
         except Exception:
+            log_system("初始化核心失败", traceback.format_exc())
             traceback.print_exc()
             splash.after(0, splash.destroy)
             return
@@ -81,11 +86,14 @@ def show_splash_and_start():
     splash.mainloop()
 
 def main():
+    init_db()
+    log_system("调用 main", "program entry")
     parser = argparse.ArgumentParser(description="ReadAlaud 启动程序")
     parser.add_argument("--no-icon", action="store_true", help="启动时不显示应用启动图标")
     args = parser.parse_args()
 
     if args.no_icon:
+        log_system("无启动图标模式", "--no-icon")
         from readalaud.core import ReadAlaud
 
         r = ReadAlaud()

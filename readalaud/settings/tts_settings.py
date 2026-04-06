@@ -8,6 +8,7 @@ DEFAULT_SETTINGS = {"goal": 0, "stop-dur": 0, "db-level": 0, "calibration": 94, 
 
 
 def save_tts_settings(self, args):
+    self.log_operation("调用保存TTS设置", f"if_tts={args[0] if args else 'unknown'}")
     try:
         settings_path = f"./data/{self.current_acount}/settings.json"
         with open(settings_path, "r") as f:
@@ -36,11 +37,13 @@ def save_tts_settings(self, args):
             with open(tts_config_path, "w") as f:
                 json.dump(write_list, f)
     except FileNotFoundError:
+        self.log_error("保存TTS设置失败", "settings.json 不存在，已重建默认配置")
         settings_path = f"./data/{self.current_acount}/settings.json"
         with open(settings_path, "w") as f:
             json.dump(DEFAULT_SETTINGS.copy(), f)
         self.gui.info(message="无法找到你的设置文件！\n已自动重置，请重新完成所有设置!")
     except json.JSONDecodeError:
+        self.log_error("保存TTS设置失败", "settings.json JSON 解析失败")
         self.gui.error(message="设置文件解析失败！\n请不要随意修改data文件夹中的文件！")
 
 
@@ -59,6 +62,7 @@ def _clean_outdated_tts_cache(self, new_config):
                         try:
                             os.remove(file_path)
                         except Exception as e:
+                            self.log_error("清理TTS缓存失败", f"{file_path}: {e}")
                             print(f"Error deleting file {file_path}: {e}")
     except (FileNotFoundError, json.JSONDecodeError):
         pass

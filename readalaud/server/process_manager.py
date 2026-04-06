@@ -7,6 +7,7 @@ import platform
 import socket
 import re
 from ..gui.gui_service import get_gui_service
+from ..logger.log_manager import log_system
 
 
 def bind_server_manager_api(instance):
@@ -26,12 +27,15 @@ def dev_or_pro():
 def check_if_server_running(port=8008):
     try:
         with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+            log_system("检查服务器状态", f"port={port}, running=True")
             return True
     except OSError:
+        log_system("检查服务器状态", f"port={port}, running=False")
         return False
 
 
 def server_pid(port=8008):
+    log_system("查询服务器PID", f"port={port}")
     system = platform.system()
     if system == "Windows":
         try:
@@ -61,6 +65,7 @@ def server_pid(port=8008):
 
 def end_server_process(force=False, pid=None):
     if pid is None:
+        log_system("终止服务器进程失败", "未提供 PID")
         return "No PID provided"
     system = platform.system()
     flag = "/F" if force else ""
@@ -70,8 +75,10 @@ def end_server_process(force=False, pid=None):
         else:
             cmd = f"kill {'-9 ' if force else ''}{pid}".strip()
         subprocess.check_output(cmd, shell=True, encoding="utf-8")
+        log_system("终止服务器进程成功", f"pid={pid}, force={force}")
         return "suc"
     except subprocess.CalledProcessError as e:
+        log_system("终止服务器进程失败", f"pid={pid}, force={force}, error={e}")
         if force:
             get_gui_service().error(message="无法终止已经存在的服务器进程！")
         return str(e)
@@ -81,4 +88,5 @@ def end_server_process(force=False, pid=None):
 
 def _start_manager_window(self):
     from .manager_window import start_manager
+    self.log_operation("打开服务器管理器", "执行 start_manager")
     start_manager(self)
