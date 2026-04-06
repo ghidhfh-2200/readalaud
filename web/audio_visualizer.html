@@ -383,8 +383,8 @@
                 const dbfs = 20 * (Math.log10 ? Math.log10(rms) : Math.log(rms) / Math.LN10);
                 const dbSpl = dbfs + CALIBRATION_OFFSET_DB;
                 if (splDisplay) {
-                    splDisplay.textContent = `${Math.round(dbSpl)} dB`;
                     if (if_paused) {
+                        splDisplay.textContent = `已暂停 ${Math.round(dbSpl)} dB`
                         try {
                             count++
                             if (count % 2 == 0) {
@@ -394,6 +394,9 @@
                             console.error(e)
                         }
                         return;
+                    }
+                    else {
+                        splDisplay.textContent = `${Math.round(dbSpl)} dB`;
                     }
                     if (dbSpl >= window.threshold) {
                         if (timer_running) {
