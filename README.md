@@ -27,16 +27,14 @@ ReadAlaud 是一个旨在帮助用户建立和保持朗读习惯的跨平台应�
     # Windows
     ```bash
     python -m venv venv
-    venv\Scripts\activate
+    venv\\Scripts\\activate
     pip install -r requirements.txt
-    npm install 
     ```
     # macOS/Linux
     ```bash
     python3 -m venv venv
     source venv/bin/activate
     pip install -r requirements.txt
-    npm install
     ```
 
 

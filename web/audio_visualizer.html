@@ -3,9 +3,54 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="./bootstrap.min.css">
     <title>实时语音可视化</title>
     <style>
+        :root {
+            --bs-primary: #0d6efd;
+            --bs-danger: #dc3545;
+            --bs-white: #ffffff;
+            --bs-focus: rgba(13, 110, 253, 0.35);
+        }
+        .btn {
+            display: inline-block;
+            font-weight: 500;
+            line-height: 1.5;
+            text-align: center;
+            text-decoration: none;
+            vertical-align: middle;
+            cursor: pointer;
+            user-select: none;
+            background-color: transparent;
+            border: 1px solid transparent;
+            padding: 0.5rem 1rem;
+            font-size: 1rem;
+            border-radius: 0.5rem;
+            transition: all .15s ease-in-out;
+        }
+        .btn:focus-visible {
+            outline: none;
+            box-shadow: 0 0 0 0.2rem var(--bs-focus);
+        }
+        .btn-lg {
+            padding: 0.6rem 1.1rem;
+            font-size: 1.1rem;
+        }
+        .btn-outline-danger {
+            color: var(--bs-danger);
+            border-color: var(--bs-danger);
+        }
+        .btn-outline-danger:hover {
+            color: var(--bs-white);
+            background-color: var(--bs-danger);
+        }
+        .btn-outline-primary {
+            color: var(--bs-primary);
+            border-color: var(--bs-primary);
+        }
+        .btn-outline-primary:hover {
+            color: var(--bs-white);
+            background-color: var(--bs-primary);
+        }
         * {
             margin: 0;
             padding: 0;
@@ -35,7 +80,9 @@
             position: relative;
             left: 50%;
             right: 50%;
-            position-anchor: inherit;
+            display: flex;
+            flex-direction: row;
+            gap: 8px;
             transform: translateX(-50%);
         }
         .inform-bar {

@@ -4,6 +4,7 @@ socket_server.py —— FastAPI HTTP 端点 + WebSocket 音频流接收。
 import fastapi
 import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.websockets import WebSocket
 import json
@@ -21,6 +22,8 @@ def bind_server_api(instance):
 
 def start_socket_server(queue=None):
     fast_server = fastapi.FastAPI(debug=False, redoc_url=None, docs_url=None)
+    project_root = pathlib.Path(__file__).resolve().parent.parent.parent
+    web_dir = project_root / "web"
 
     fast_server.add_middleware(
         CORSMiddleware,
@@ -30,11 +33,16 @@ def start_socket_server(queue=None):
         allow_headers=["*"],
     )
 
-    project_root = pathlib.Path(__file__).resolve().parent.parent.parent
-    web_dir = project_root / "web"
     if web_dir.exists():
         # 挂载后，比如通过 http://127.0.0.1:8008/web/audio_visualizer.html 即可访问静态文件
         fast_server.mount("/web", StaticFiles(directory=str(web_dir), html=True), name="web")
+
+    @fast_server.get("/bootstrap.min.css", include_in_schema=False)
+    async def bootstrap_css():
+        css_path = web_dir / "bootstrap.min.css"
+        if css_path.exists():
+            return FileResponse(str(css_path), media_type="text/css")
+        return JSONResponse(status_code=404, content={"message": "bootstrap.min.css not found"})
 
     last_state = {}
 
