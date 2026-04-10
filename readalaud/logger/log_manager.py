@@ -94,7 +94,7 @@ def get_logs(log_type=None, month=None, level=None, limit=1000):
         conn = sqlite3.connect(DB_PATH, timeout=5)
         c = conn.cursor()
         
-        query = "SELECT timestamp, log_level, log_type, account, action, details FROM logs WHERE 1=1"
+        query = "SELECT id, timestamp, log_level, log_type, account, action, details FROM logs WHERE 1=1"
         params = []
         
         if log_type and log_type != "ALL":
@@ -119,6 +119,55 @@ def get_logs(log_type=None, month=None, level=None, limit=1000):
     except Exception as e:
         print(f"Failed to read logs: {e}")
         return []
+
+
+def delete_logs_by_ids(log_ids):
+    if not log_ids:
+        return 0
+    try:
+        ids = [int(i) for i in log_ids if str(i).strip()]
+        if not ids:
+            return 0
+        placeholders = ",".join(["?"] * len(ids))
+        conn = sqlite3.connect(DB_PATH, timeout=5)
+        c = conn.cursor()
+        c.execute(f"DELETE FROM logs WHERE id IN ({placeholders})", tuple(ids))
+        deleted = c.rowcount or 0
+        conn.commit()
+        conn.close()
+        return deleted
+    except Exception as e:
+        print(f"Failed to delete logs by ids: {e}")
+        return 0
+
+
+def delete_logs(log_type=None, month=None, level=None):
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=5)
+        c = conn.cursor()
+        query = "DELETE FROM logs WHERE 1=1"
+        params = []
+
+        if log_type and log_type != "ALL":
+            query += " AND log_type=?"
+            params.append(log_type)
+
+        if level and level != "ALL":
+            query += " AND log_level=?"
+            params.append(level)
+
+        if month and month != "全部月份":
+            query += " AND timestamp LIKE ?"
+            params.append(f"{month}%")
+
+        c.execute(query, tuple(params))
+        deleted = c.rowcount or 0
+        conn.commit()
+        conn.close()
+        return deleted
+    except Exception as e:
+        print(f"Failed to delete logs: {e}")
+        return 0
 
 def get_available_months():
     try:

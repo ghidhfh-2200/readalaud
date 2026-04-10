@@ -8,6 +8,8 @@ from .log_manager import (
     log_error,
     log_fatal,
     log_system,
+    delete_logs,
+    delete_logs_by_ids,
 )
 from .log_viewer import show_log_viewer
 
@@ -31,4 +33,6 @@ __all__ = [
     "log_warning",
     "log_error",
     "log_fatal",
+    "delete_logs",
+    "delete_logs_by_ids",
 ]
