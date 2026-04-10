@@ -40,10 +40,15 @@ def show_log_viewer(self):
     type_combo = ttk.Combobox(ctrl_frame, textvariable=type_var, values=["ALL", "AUDIT", "OPERATION"], state="readonly", width=12, font=("微软雅黑", 10))
     type_combo.pack(side="left", padx=5)
 
+    tk.Label(ctrl_frame, text="等级:", font=("微软雅黑", 10)).pack(side="left", padx=(10, 0))
+    level_var = tk.StringVar(value="ALL")
+    level_combo = ttk.Combobox(ctrl_frame, textvariable=level_var, values=["ALL", "INFO", "SUCCESS", "WARNING", "ERROR", "FATAL"], state="readonly", width=12, font=("微软雅黑", 10))
+    level_combo.pack(side="left", padx=5)
+
     def load_logs(*args):
         for item in tree.get_children():
             tree.delete(item)
-        logs = get_logs(log_type=type_var.get(), month=month_var.get())
+        logs = get_logs(log_type=type_var.get(), month=month_var.get(), level=level_var.get())
         for log in logs:
             tree.insert("", "end", values=log)
 
@@ -51,19 +56,21 @@ def show_log_viewer(self):
     refresh_btn.pack(side="left", padx=15)
 
     # 列表区
-    columns = ("timestamp", "log_type", "account", "action", "details")
+    columns = ("timestamp", "log_level", "log_type", "account", "action", "details")
     tree = ttk.Treeview(viewer, columns=columns, show="headings")
     tree.heading("timestamp", text="时间")
+    tree.heading("log_level", text="等级")
     tree.heading("log_type", text="类型")
     tree.heading("account", text="账号")
     tree.heading("action", text="操作")
     tree.heading("details", text="详细内容")
 
     tree.column("timestamp", width=150, anchor="center")
+    tree.column("log_level", width=90, anchor="center")
     tree.column("log_type", width=100, anchor="center")
     tree.column("account", width=120, anchor="center")
     tree.column("action", width=160, anchor="center")
-    tree.column("details", width=330, anchor="w")
+    tree.column("details", width=300, anchor="w")
 
     vsb = ttk.Scrollbar(viewer, orient="vertical", command=tree.yview)
     vsb.pack(side="right", fill="y")
@@ -72,4 +79,5 @@ def show_log_viewer(self):
 
     type_combo.bind("<<ComboboxSelected>>", load_logs)
     month_combo.bind("<<ComboboxSelected>>", load_logs)
+    level_combo.bind("<<ComboboxSelected>>", load_logs)
     load_logs()

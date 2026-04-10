@@ -4,7 +4,7 @@ import traceback
 from pathlib import Path
 
 import tkinter as tk
-from readalaud.logger.log_manager import init_db, log_system
+from readalaud.logger.log_manager import init_db, log_system, log_fatal
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -75,7 +75,7 @@ def show_splash_and_start():
 
             app = ReadAlaud()
         except Exception:
-            log_system("初始化核心失败", traceback.format_exc())
+            log_fatal("初始化核心失败", traceback.format_exc())
             traceback.print_exc()
             splash.after(0, splash.destroy)
             return

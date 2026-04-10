@@ -190,7 +190,7 @@ def data_thread(ipc_queue, ui_queue, instance):
                 break
 
         except Exception as e:
-            instance.log_error("数据线程异常", str(e))
+            instance.log_fatal("数据线程异常", str(e))
             log_system("data_thread 崩溃", str(e))
             print(f"Error in data_thread: {e}")
             break

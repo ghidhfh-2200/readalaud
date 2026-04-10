@@ -110,7 +110,7 @@ def _popup_auth_confirm(self, option):
     def on_confirm(event=None):
         pwd = pwd_var.get()
         if not pwd:
-            self.log_error("敏感操作认证失败", "密码为空")
+            self.log_warning("敏感操作认证未通过", "密码为空")
             self.gui.warning("密码不能为空", title="提示", parent=dialog)
             return
         
@@ -262,7 +262,7 @@ def _change_theme(self):
     try:
         selection = self.customize_listbox.curselection()
         if not selection:
-            self.log_error("主题切换失败", "未选择主题")
+            self.log_warning("主题切换未执行", "未选择主题")
             self.gui.error(message="请先选择一个样式")
             return
 
