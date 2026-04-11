@@ -11,5 +11,6 @@ reading 子包 —— 朗读会话全流程管理。
 """
 
 from .session import bind_reading_api, reading_data_get_and_check, start_reading
+from .data_io import load_today_reading_status
 
-__all__ = ["bind_reading_api", "reading_data_get_and_check", "start_reading"]
+__all__ = ["bind_reading_api", "reading_data_get_and_check", "start_reading", "load_today_reading_status"]

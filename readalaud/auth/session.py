@@ -44,7 +44,8 @@ def _login_and_sign_up(self):
             _try_login(self, encode_input_acount, get_input_password, read_json, read_passwords)
         else:
             _register_new_account(self, get_input_acount, get_input_password, read_json)
-
+    self.login_acount_enter.set("")
+    self.login_password_enter.set("")
 
 def _register_new_account(self, username, password, read_json):
     self.log_operation("调用注册流程", f"准备注册账户 {username}")
@@ -151,6 +152,10 @@ def _delete_the_account(self):
         if not self.gui.ask_yes_no(message="确定要注销账号吗？\n你的数据会全部丢失!"):
             self.log_warning("取消删除账户", "用户取消删除账户")
             return
+        try:
+            self._stop_sidebar_today_status_monitor()
+        except Exception:
+            pass
         read_accounts = load_accounts()
         read_accounts["names"].remove(self.current_acount)
         read_accounts["passwords"].pop(self.current_acount)
@@ -183,6 +188,10 @@ def _reset_account_data(self):
         if not self.gui.ask_yes_no(message="确定要重置所有数据吗？\n你的密码会保持不变\n其他数据会全部丢失!"):
             self.log_warning("取消重置账户数据", "用户取消重置")
             return
+        try:
+            self._stop_sidebar_today_status_monitor()
+        except Exception:
+            pass
         if os.path.exists(f"./data/{self.current_acount}"):
             shutil.rmtree(f"./data/{self.current_acount}")
         if os.path.exists(f"./details/{self.current_acount}"):
@@ -201,6 +210,10 @@ def _reset_account_data(self):
 
 def _logout(self):
     self.log_operation("调用退出登录", "执行 logout")
+    try:
+        self._stop_sidebar_today_status_monitor()
+    except Exception:
+        pass
     self.current_acount = ""
     self.if_logged_in = False
     try:

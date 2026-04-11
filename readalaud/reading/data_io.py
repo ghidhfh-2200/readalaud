@@ -7,6 +7,19 @@ import os
 import datetime
 
 
+def _read_day_json(acount, date_obj):
+    month_str = date_obj.strftime("%Y-%m")
+    day_str = date_obj.strftime("%Y-%m-%d")
+    data_path = f"./data/{acount}/{month_str}/{day_str}.json"
+    if not os.path.exists(data_path):
+        return None
+    try:
+        with open(data_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
 def write_db_data(acount, db, date):
     """将 dB 列表追加写入当日的 DB.csv。"""
     try:
@@ -61,3 +74,43 @@ def load_today_data(current_acount, load_settings, show_debug=None):
             }
             with open(data_path, "w", encoding="utf-8") as f:
                 json.dump(write_data, f)
+
+
+def load_today_reading_status(current_acount, load_settings=None):
+    """读取当日/昨日朗读状态，供侧边栏展示使用。
+
+    返回一个字典，包含：是否朗读、目标达成度、总时长、效率、与昨日总时长差值等信息。
+    """
+    if not current_acount:
+        return {}
+
+    if load_settings is None:
+        from ..settings.settings_io import load_settings_data
+        load_settings, _ = load_settings_data(current_acount)
+
+    today = datetime.datetime.now().date()
+    today_data = _read_day_json(current_acount, today) or {}
+    yesterday_data = _read_day_json(current_acount, today - datetime.timedelta(days=1)) or {}
+
+    goal = int(load_settings.get("goal", 0) or 0)
+    total_duration = int(today_data.get("total", 0) or 0)
+    real_read_time = int(today_data.get("real_read_time", 0) or 0)
+    efficiency = float(today_data.get("efficiency", 0.0) or 0.0)
+    compare_yesterday = None
+    if yesterday_data:
+        compare_yesterday = total_duration - int(yesterday_data.get("total", 0) or 0)
+
+    completion_ratio = None
+    if goal > 0:
+        completion_ratio = real_read_time / goal
+
+    return {
+        "goal": goal,
+        "is_reading": False,
+        "has_today_data": bool(today_data),
+        "total_duration": total_duration,
+        "real_read_time": real_read_time,
+        "efficiency": efficiency,
+        "completion_ratio": completion_ratio,
+        "compare_yesterday": compare_yesterday,
+    }

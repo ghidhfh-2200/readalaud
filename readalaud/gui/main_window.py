@@ -4,14 +4,18 @@
 
 import tkinter as tk
 import base64
+import threading
 from ..calibration import start_calibration
 from ..server import check_if_server_running, server_pid, end_server_process, start_manager
+from ..reading.data_io import load_today_reading_status
 
 
 # ──────────────────────── 主窗口 ────────────────────────
 
 def _generate_main_window(self):
     self.main_window = tk.Tk()
+    self._sidebar_status_stop_event = threading.Event()
+    self._sidebar_status_thread = None
     try:
         self.main_window.iconbitmap("./assets/icon.ico")
     except Exception:
@@ -31,7 +35,7 @@ def _generate_main_window(self):
     )
     self.main_paned_window.pack(fill=tk.BOTH, expand=True)
     # button frame
-    button_frame = tk.Frame(self.main_paned_window, width=200, height=600)
+    button_frame = tk.Frame(self.main_paned_window, width=300, height=600)
     self.main_paned_window.add(button_frame)
     # content frame
     self.content_frame = tk.Frame(self.main_paned_window, width=600, height=600)
@@ -55,6 +59,26 @@ def _generate_main_window(self):
         master=button_frame, text="当前登录：(未登录)", font=("微软雅黑", 12)
     )
     self.current_account_label.pack(fill=tk.BOTH)
+
+    sidebar_status_frame = tk.LabelFrame(
+        master=button_frame,
+        text="今日朗读状态",
+        padx=6,
+        pady=6,
+    )
+    sidebar_status_frame.pack(fill=tk.BOTH, expand=False, padx=4, pady=(6, 4))
+
+    self.sidebar_status_labels = {
+        "state": tk.Label(sidebar_status_frame, text="是否朗读：--", anchor="w", justify="left", wraplength=180),
+        "completion": tk.Label(sidebar_status_frame, text="目标达成度：--", anchor="w", justify="left", wraplength=180),
+        "total": tk.Label(sidebar_status_frame, text="总时长：--:--:--", anchor="w", justify="left", wraplength=180),
+        "efficiency": tk.Label(sidebar_status_frame, text="效率：--", anchor="w", justify="left", wraplength=180),
+        "compare": tk.Label(sidebar_status_frame, text="较昨日总时长：--", anchor="w", justify="left", wraplength=180),
+    }
+    for key in ["state", "completion", "total", "efficiency", "compare"]:
+        self.sidebar_status_labels[key].pack(fill=tk.BOTH, anchor="w", pady=1)
+    _reset_sidebar_today_status(self)
+
     self.main_window.protocol("WM_DELETE_WINDOW", lambda: check_if_reading(self))
     self.main_window.mainloop()
 
@@ -164,3 +188,110 @@ def _welcome_page(self, destroy_window):
             command=lambda: start_manager(self),
         )
         server_manager_btn.pack(fill=tk.BOTH, expand=1, pady=1)
+
+        _start_sidebar_today_status_monitor(self)
+
+
+def _reset_sidebar_today_status(self):
+    labels = getattr(self, "sidebar_status_labels", None)
+    if not labels:
+        return
+    try:
+        labels["state"].config(text="是否朗读：--")
+        labels["completion"].config(text="目标达成度：--")
+        labels["total"].config(text="总时长：--:--:--")
+        labels["efficiency"].config(text="效率：--")
+        labels["compare"].config(text="较昨日总时长：--")
+    except Exception:
+        pass
+
+
+def _apply_sidebar_today_status(self, status):
+    labels = getattr(self, "sidebar_status_labels", None)
+    if not labels:
+        return
+    try:
+        if not status:
+            _reset_sidebar_today_status(self)
+            labels["state"].config(text="是否朗读：未登录")
+            return
+
+        total_duration = int(status.get("total_duration", 0) or 0)
+        efficiency = float(status.get("efficiency", 0.0) or 0.0)
+        completion_ratio = status.get("completion_ratio")
+        compare_yesterday = status.get("compare_yesterday")
+
+        labels['state'].config(text=f"是否朗读: {'已朗读' if total_duration > 0 else '未朗读'}")
+        if completion_ratio is None:
+            labels["completion"].config(text="目标达成度：未设置目标")
+        else:
+            labels["completion"].config(text=f"目标达成度：{completion_ratio:.1%}")
+        labels["total"].config(text=f"总时长：{divmod(total_duration, 3600)[0]:02d}:{divmod(total_duration, 3600)[1]//60:02d}:{total_duration % 60:02d}")
+        labels["efficiency"].config(text=f"效率：{efficiency:.0%}")
+        if compare_yesterday is None:
+            compare_text = "较昨日总时长：无昨日数据"
+        elif compare_yesterday > 0:
+            compare_text = f"较昨日总时长：增加 {compare_yesterday} 秒"
+        elif compare_yesterday < 0:
+            compare_text = f"较昨日总时长：减少 {abs(compare_yesterday)} 秒"
+        else:
+            compare_text = "较昨日总时长：持平"
+        labels["compare"].config(text=compare_text)
+    except Exception:
+        pass
+
+
+def _sidebar_today_status_worker(self, stop_event):
+    while not stop_event.is_set():
+        try:
+            if not getattr(self, "if_logged_in", False) or not getattr(self, "current_acount", ""):
+                status = None
+            else:
+                status = load_today_reading_status(self.current_acount)
+                status["is_reading"] = bool(getattr(self, "if_reading", False))
+
+            if hasattr(self, "main_window") and self.main_window.winfo_exists():
+                self.main_window.after(0, lambda payload=status: _apply_sidebar_today_status(self, payload))
+        except Exception:
+            pass
+
+        if stop_event.wait(10):
+            break
+
+
+def _start_sidebar_today_status_monitor(self):
+    thread = getattr(self, "_sidebar_status_thread", None)
+    if thread and thread.is_alive():
+        return
+
+    _stop_sidebar_today_status_monitor(self, reset=False)
+    if not getattr(self, "if_logged_in", False):
+        _reset_sidebar_today_status(self)
+        return
+    if not hasattr(self, "main_window") or not self.main_window.winfo_exists():
+        return
+
+    stop_event = threading.Event()
+    self._sidebar_status_stop_event = stop_event
+    thread = threading.Thread(
+        target=_sidebar_today_status_worker,
+        args=(self, stop_event),
+        daemon=True,
+        name="sidebar-today-status-monitor",
+    )
+    self._sidebar_status_thread = thread
+    thread.start()
+
+
+def _stop_sidebar_today_status_monitor(self, reset=True):
+    stop_event = getattr(self, "_sidebar_status_stop_event", None)
+    if stop_event:
+        stop_event.set()
+
+    thread = getattr(self, "_sidebar_status_thread", None)
+    if thread and thread.is_alive() and thread is not threading.current_thread():
+        thread.join(timeout=0.3)
+
+    self._sidebar_status_thread = None
+    if reset:
+        _reset_sidebar_today_status(self)

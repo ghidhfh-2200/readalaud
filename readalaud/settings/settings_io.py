@@ -13,6 +13,26 @@ from .tts_settings import save_tts_settings
 DEFAULT_SETTINGS = {"goal": 0, "stop-dur": 0, "db-level": 0, "calibration": 94, "theme": "darkly", "if_tts": 0}
 
 
+def load_settings_data(current_account):
+    """读取指定账号的 settings.json；缺失或损坏时自动重建默认文件。
+
+    返回 (settings_dict, rebuilt_flag)。
+    """
+    settings_path = f"./data/{current_account}/settings.json"
+    try:
+        with open(settings_path, "r") as f:
+            return json.load(f), False
+    except (FileNotFoundError, json.JSONDecodeError):
+        try:
+            os.makedirs(f"./data/{current_account}")
+        except FileExistsError:
+            pass
+        read_settings = DEFAULT_SETTINGS.copy()
+        with open(settings_path, "w") as f:
+            json.dump(read_settings, f)
+        return read_settings, True
+
+
 def bind_settings(instance):
     instance.save_settings_except_tts = lambda option: _save_settings_except_tts(instance, option)
     instance.load_settings = lambda: _load_settings(instance)
@@ -25,18 +45,9 @@ def bind_settings(instance):
 def _load_settings(self):
     self.log_operation("调用加载设置", "执行 load_settings")
     current_account = self.current_acount
-    try:
-        with open(f"./data/{current_account}/settings.json", "r") as f:
-            read_settings = json.load(f)
-    except FileNotFoundError:
+    read_settings, rebuilt = load_settings_data(current_account)
+    if rebuilt:
         self.log_error("加载设置失败", "settings.json 不存在，准备自动重建")
-        try:
-            os.makedirs(f"./data/{current_account}")
-        except FileExistsError:
-            pass
-        read_settings = DEFAULT_SETTINGS.copy()
-        with open(f"./data/{self.current_acount}/settings.json", "w") as f:
-            json.dump(read_settings, f)
         self.gui.info(message="无法找到您的设置文件，已将设置全部重置!")
 
     self.settings_goal_value.set(value=int(read_settings["goal"]) / 60)
@@ -69,6 +80,8 @@ def _load_settings(self):
         except Exception:
             self.log_error("加载 TTS 设置失败", "tts_config.json 不可读或格式错误")
             pass
+
+    return read_settings
 
 
 # ── 保存各项设置 ──────────────────────────────────────────

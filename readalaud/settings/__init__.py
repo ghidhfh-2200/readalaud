@@ -6,7 +6,6 @@ settings 子包 —— 用户设置读写与主题切换。
   - tts_settings.py : TTS 相关设置的保存与缓存清理
 """
 
-from .settings_io import bind_settings, _load_settings
+from .settings_io import bind_settings, _load_settings, load_settings_data
 
-__all__ = ["bind_settings", "_load_settings"]
-__all__ = ["bind_settings"]
+__all__ = ["bind_settings", "_load_settings", "load_settings_data"]

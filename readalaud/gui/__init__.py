@@ -10,7 +10,13 @@ gui 子包 —— 将原 gui.py 按功能拆分为多个模块。
   - data_gui.py      : 数据统计与图表页面
 """
 
-from .main_window import _generate_main_window, check_if_reading, _welcome_page
+from .main_window import (
+  _generate_main_window,
+  check_if_reading,
+  _welcome_page,
+  _start_sidebar_today_status_monitor,
+  _stop_sidebar_today_status_monitor,
+)
 from .login_gui import _generate_login_gui
 from .settings_gui import _generate_settings_gui
 from .tts_gui import (
@@ -30,6 +36,8 @@ def bind_gui(instance):
     """把 GUI 相关的方法绑定到 ReadAlaud 实例上。"""
     instance.generate_main_window = lambda: _generate_main_window(instance)
     instance.welcome_page = lambda destroy_window: _welcome_page(instance, destroy_window)
+    instance._start_sidebar_today_status_monitor = lambda: _start_sidebar_today_status_monitor(instance)
+    instance._stop_sidebar_today_status_monitor = lambda reset=True: _stop_sidebar_today_status_monitor(instance, reset=reset)
     instance.generate_login_gui = lambda: _generate_login_gui(instance)
     instance.generate_settings_gui = lambda: _generate_settings_gui(instance)
     instance.generate_reading_gui = lambda: _generate_reading_gui(instance)
