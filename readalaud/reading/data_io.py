@@ -20,8 +20,15 @@ def _read_day_json(acount, date_obj):
         return None
 
 
-def write_db_data(acount, db, date):
-    """将 dB 列表追加写入当日的 DB.csv。"""
+def write_db_data(acount, db=None, date=None, db_list=None):
+    """将 dB 列表追加写入当日的 DB.csv。
+
+    兼容历史调用：支持 db=... 和 db_list=... 两种参数名。
+    """
+    if db is None:
+        db = db_list
+    if db is None or date is None:
+        return
     try:
         with open(f"./details/{acount}/{date}/DB.csv", "a", newline="") as f:
             csv.writer(f).writerow(db)
@@ -33,13 +40,7 @@ def write_db_data(acount, db, date):
 
 
 def _ensure_detail_dirs(acount, date):
-    for path in [
-        "./details",
-        f"./details/{acount}",
-        f"./details/{acount}/{date}",
-    ]:
-        if not os.path.exists(path):
-            os.mkdir(path)
+    os.makedirs(f"./details/{acount}/{date}", exist_ok=True)
 
 
 def load_today_data(current_acount, load_settings, show_debug=None):
