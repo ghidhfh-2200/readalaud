@@ -11,6 +11,8 @@ import urllib.request
 from .data_io import write_db_data
 from .wav_merger import merge_wav
 from .tts_trigger import check_tts_conditions
+from ..tts.playback_control import request_stop_all_tts, clear_stop_request, should_stop_tts
+from ..tts.local_tts import stop_speaking
 from ..logger.log_manager import log_system
 
 
@@ -31,6 +33,8 @@ def data_thread(ipc_queue, ui_queue, instance):
 
     instance.tts_triggered_events = set()
     instance.tts_cooldowns = {}
+    instance.tts_detection_enabled = True
+    clear_stop_request()
     current_pause_start = None
     last_ui_update_time = 0
 
@@ -134,7 +138,7 @@ def data_thread(ipc_queue, ui_queue, instance):
                             float(instance.read_today_data["real_read_time"]) / float(instance.read_today_data["total"]), 2
                         )
 
-                if instance.tts_read:
+                if instance.tts_read and getattr(instance, "tts_detection_enabled", True) and not should_stop_tts() and getattr(instance, "if_reading", True):
                     check_tts_conditions(
                         instance=instance,
                         tts_config=instance.tts_read,
@@ -163,6 +167,9 @@ def data_thread(ipc_queue, ui_queue, instance):
 
             if "end_sig" in data:
                 instance.log_operation("收到结束信号", "准备写回日统计与合并音频")
+                instance.tts_detection_enabled = False
+                request_stop_all_tts()
+                stop_speaking()
                 instance.if_reading = False
                 ui_queue.put({"type": "stop"})
                 current_account = getattr(instance, "current_acount")
@@ -195,4 +202,10 @@ def data_thread(ipc_queue, ui_queue, instance):
             print(f"Error in data_thread: {e}")
             break
 
+    try:
+        instance.tts_detection_enabled = False
+        request_stop_all_tts()
+        stop_speaking()
+    except Exception:
+        pass
     instance.log_operation("数据线程退出", "data_thread loop ended")

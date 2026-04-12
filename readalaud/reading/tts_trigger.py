@@ -5,8 +5,12 @@ import os
 import threading
 import time
 
+from readalaud.tts.playback_control import should_stop_tts, register_play_obj, unregister_play_obj
+
 
 def _play_custom_audio(account_dir, index_key):
+    if should_stop_tts():
+        return False
     base_path = f"./data/{account_dir}/tts"
     wav_path = os.path.abspath(os.path.join(base_path, f"{index_key}.wav"))
 
@@ -21,7 +25,18 @@ def _play_custom_audio(account_dir, index_key):
                 framerate = wf.getframerate()
                 raw = wf.readframes(wf.getnframes())
             play_obj = sa.play_buffer(raw, channels, sampwidth, framerate)
-            play_obj.wait_done()
+            register_play_obj(play_obj)
+            try:
+                while play_obj.is_playing():
+                    if should_stop_tts():
+                        try:
+                            play_obj.stop()
+                        except Exception:
+                            pass
+                        break
+                    time.sleep(0.05)
+            finally:
+                unregister_play_obj(play_obj)
             return True
         except Exception as e:
             print(f"Error playing custom wav {wav_path}: {e}")
@@ -33,6 +48,8 @@ def _play_custom_audio(account_dir, index_key):
 def check_tts_conditions(instance, tts_config, current_db, current_pause_duration,
                          left, total_stop, total, real_read_time, max_db, efficiency):
     """根据 tts_config 中的各条件，决定是否触发 TTS 播报。"""
+    if should_stop_tts() or not getattr(instance, "if_reading", True) or not getattr(instance, "tts_detection_enabled", True):
+        return
     current_time = time.time()
 
     for index_key, config in tts_config.items():
@@ -75,6 +92,8 @@ def check_tts_conditions(instance, tts_config, current_db, current_pause_duratio
                         should_trigger = True
 
             if not should_trigger:
+                continue
+            if should_stop_tts() or not getattr(instance, "if_reading", True) or not getattr(instance, "tts_detection_enabled", True):
                 continue
             if is_one_shot and index_key in instance.tts_triggered_events:
                 continue

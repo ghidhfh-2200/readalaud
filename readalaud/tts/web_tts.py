@@ -7,6 +7,9 @@ import platform
 import tempfile
 import threading
 import wave
+import time
+
+from .playback_control import should_stop_tts, register_play_obj, unregister_play_obj
 
 try:
     from edge_playback.win32_playback import play_mp3_win32
@@ -57,6 +60,8 @@ def _run_edge_tts_cli(text, volume, speed, voice_name, output_path):
 
 
 def _play_wav_file(path):
+    if should_stop_tts():
+        return False
     try:
         import simpleaudio as sa
         with wave.open(path, "rb") as wf:
@@ -65,7 +70,18 @@ def _play_wav_file(path):
             framerate = wf.getframerate()
             raw = wf.readframes(wf.getnframes())
         play_obj = sa.play_buffer(raw, channels, sampwidth, framerate)
-        play_obj.wait_done()
+        register_play_obj(play_obj)
+        try:
+            while play_obj.is_playing():
+                if should_stop_tts():
+                    try:
+                        play_obj.stop()
+                    except Exception:
+                        pass
+                    break
+                time.sleep(0.05)
+        finally:
+            unregister_play_obj(play_obj)
         return True
     except Exception as e:
         print(f"WAV playback error: {e}")
@@ -74,6 +90,11 @@ def _play_wav_file(path):
 
 def _play_web_tts_thread(text, volume, speed, voice_name, on_finish=None):
     """在当前线程中生成临时音频并播放（适合新线程调用）。"""
+    if should_stop_tts():
+        if on_finish:
+            on_finish()
+        return
+
     fd, path = tempfile.mkstemp(suffix=".wav")
     os.close(fd)
 
