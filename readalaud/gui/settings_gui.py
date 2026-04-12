@@ -13,6 +13,7 @@ from .tts_gui import (
     volume_scale_change,
     speed_scale_change,
     test_tts,
+    stop_tts_test,
     save_tts_setting,
 )
 
@@ -48,10 +49,22 @@ def _generate_settings_gui(self):
     # ── customize frame ──
     _build_customize_tab(self, customize_frame)
 
+    def _save_tts_and_back():
+        try:
+            save_tts_setting(self)
+        except Exception as e:
+            try:
+                self.log_error("返回前自动保存TTS失败", str(e))
+            except Exception:
+                pass
+            self.gui.error(message=f"自动保存TTS失败：{e}")
+            return
+        self.welcome_page(destroy_window=[self.settings_frame, "settings"])
+
     # 返回按钮
     back_button = tk.Button(
         master=self.settings_frame, text="返回", font=self.mainpage_button_font, width=10,
-        command=lambda: self.welcome_page(destroy_window=[self.settings_frame, "settings"]),
+        command=_save_tts_and_back,
     )
     back_button.pack(side="right")
     _load_settings(self=self)
@@ -277,6 +290,43 @@ def _build_tts_settings_section(self, read_frame):
     )
     self.more_web_button.pack(side="right", padx=5)
 
+    source_frame = tk.Frame(voice_config_frame)
+    source_frame.pack(fill="x", pady=(4, 0))
+    tk.Label(source_frame, text="语音方式:", font=self.mainpage_button_font).pack(side="left", padx=5)
+
+    self.tts_mode_var = tk.StringVar(value="TTS")
+    self.tts_mode_combo = ttk.Combobox(
+        source_frame,
+        values=["TTS", "自定义"],
+        textvariable=self.tts_mode_var,
+        state="readonly",
+        width=10,
+        font=self.mainpage_button_font,
+    )
+    self.tts_mode_combo.pack(side="left", padx=(0, 8))
+    self.tts_mode_combo.bind("<<ComboboxSelected>>", lambda event: self.on_tts_mode_changed(event))
+
+    self.custom_mode_var = tk.StringVar(value="上传音频")
+    self.custom_mode_combo = ttk.Combobox(
+        source_frame,
+        values=["上传音频", "直接录音"],
+        textvariable=self.custom_mode_var,
+        state="disabled",
+        width=12,
+        font=self.mainpage_button_font,
+    )
+    self.custom_mode_combo.pack(side="left", padx=(0, 8))
+    self.custom_mode_combo.bind("<<ComboboxSelected>>", lambda event: self.on_custom_mode_changed(event))
+
+    self.custom_action_button = tk.Button(
+        source_frame,
+        text="上传音频",
+        font=self.mainpage_button_font,
+        state="disabled",
+        command=lambda: self.run_custom_tts_action(),
+    )
+    self.custom_action_button.pack(side="left")
+
     # Volume control
     volume_frame = tk.Frame(voice_config_frame)
     volume_frame.pack(fill="x")
@@ -311,6 +361,11 @@ def _build_tts_settings_section(self, read_frame):
         command=lambda: test_tts(self),
     )
     self.test_button.pack(side="right", padx=5)
+    self.stop_test_button = tk.Button(
+        buttons_frame, text="停止测试", font=self.mainpage_button_font,
+        command=lambda: stop_tts_test(self),
+    )
+    self.stop_test_button.pack(side="right", padx=5)
     self.tts_save_button = tk.Button(
         buttons_frame, text="保存设置", font=self.mainpage_button_font,
         command=lambda: save_tts_setting(self),

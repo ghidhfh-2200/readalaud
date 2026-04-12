@@ -6,6 +6,7 @@ import subprocess
 import platform
 import tempfile
 import threading
+import wave
 
 try:
     from edge_playback.win32_playback import play_mp3_win32
@@ -55,15 +56,25 @@ def _run_edge_tts_cli(text, volume, speed, voice_name, output_path):
         return False
 
 
+def _play_wav_file(path):
+    try:
+        import simpleaudio as sa
+        with wave.open(path, "rb") as wf:
+            channels = wf.getnchannels()
+            sampwidth = wf.getsampwidth()
+            framerate = wf.getframerate()
+            raw = wf.readframes(wf.getnframes())
+        play_obj = sa.play_buffer(raw, channels, sampwidth, framerate)
+        play_obj.wait_done()
+        return True
+    except Exception as e:
+        print(f"WAV playback error: {e}")
+        return False
+
+
 def _play_web_tts_thread(text, volume, speed, voice_name, on_finish=None):
     """在当前线程中生成临时音频并播放（适合新线程调用）。"""
-    if play_mp3_win32 is None:
-        print("edge_playback not available")
-        if on_finish:
-            on_finish()
-        return
-
-    fd, path = tempfile.mkstemp(suffix=".mp3")
+    fd, path = tempfile.mkstemp(suffix=".wav")
     os.close(fd)
 
     try:
@@ -71,7 +82,7 @@ def _play_web_tts_thread(text, volume, speed, voice_name, on_finish=None):
         if not ok:
             return
         try:
-            play_mp3_win32(path)
+            _play_wav_file(path)
         except Exception as e:
             print(f"Error playing generated media: {e}")
     finally:
@@ -89,13 +100,9 @@ def play_cached_web_tts(text, volume, speed, output_path):
     如果缓存文件已存在则直接播放，否则先生成再播放。
     在后台线程中处理生成步骤，返回后立即回到调用方。
     """
-    if play_mp3_win32 is None:
-        print("edge_playback not available for web TTS")
-        return
-
     if os.path.exists(output_path):
         try:
-            play_mp3_win32(output_path)
+            _play_wav_file(output_path)
         except Exception as e:
             print(f"Playback error (cached): {e}")
         return
@@ -105,7 +112,7 @@ def play_cached_web_tts(text, volume, speed, output_path):
         ok = _run_edge_tts_cli(text, volume, speed, voice_name=None, output_path=output_path)
         if ok:
             try:
-                t = threading.Thread(target=play_mp3_win32, args=(output_path,))
+                t = threading.Thread(target=_play_wav_file, args=(output_path,))
                 t.start()
             except Exception as e:
                 print(f"Playback error: {e}")
@@ -117,10 +124,6 @@ async def test_tts(args: list, current_account, on_finish=None):
     """语音生成器测试（GUI 回调用）。"""
     source = args[4] if len(args) > 4 else "local"
     if source == "web":
-        if play_mp3_win32 is None:
-            if on_finish:
-                on_finish()
-            return "edge_playback library is missing or not supported on this platform."
         try:
             t = threading.Thread(
                 target=_play_web_tts_thread,

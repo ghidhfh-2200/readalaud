@@ -67,16 +67,18 @@ def _load_settings(self):
             with open(f"./data/{self.current_acount}/tts_config.json", "r") as f:
                 read_tts_settings = json.load(f)
             for key_, vals in read_tts_settings.items():
-                condition = value = text = rate = volume = voice = source = ""
+                condition = value = display = text = rate = volume = voice = source = ""
                 for key, values in read_tts_settings[key_].items():
                     if key == "condition":   condition = values
                     elif key == "value":     value = values
+                    elif key == "display":   display = values
                     elif key == "text":      text = values
                     elif key == "rate":      rate = values
                     elif key == "volume":    volume = values
                     elif key == "voice":     voice = values
                     elif key == "source":    source = values
-                self.tts_tree.insert("", tk.END, values=(f"{condition} {value}", text, rate, volume, voice, source))
+                trigger_text = display if display else f"{condition} {value}".strip()
+                self.tts_tree.insert("", tk.END, values=(trigger_text, text, rate, volume, voice, source or "local"))
         except Exception:
             self.log_error("加载 TTS 设置失败", "tts_config.json 不可读或格式错误")
             pass

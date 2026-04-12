@@ -27,6 +27,9 @@ from .tts_gui import (
     _tts_add_point,
     _tts_delete_point,
     _pop_up_time_and_text_config_window,
+  _on_tts_mode_changed,
+  _on_custom_mode_changed,
+  _run_custom_action,
 )
 from .reading_gui import _generate_reading_gui
 from .data_gui import _generate_data_gui
@@ -48,4 +51,7 @@ def bind_gui(instance):
     instance.tts_add_point = lambda: _tts_add_point(instance)
     instance.tts_delete_point = lambda: _tts_delete_point(instance)
     instance.pop_up_time_and_text_config_window = lambda: _pop_up_time_and_text_config_window(instance)
+    instance.on_tts_mode_changed = lambda event=None: _on_tts_mode_changed(instance, event)
+    instance.on_custom_mode_changed = lambda event=None: _on_custom_mode_changed(instance, event)
+    instance.run_custom_tts_action = lambda: _run_custom_action(instance)
     instance.generate_data_gui = lambda: _generate_data_gui(instance)

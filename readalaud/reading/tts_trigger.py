@@ -6,6 +6,30 @@ import threading
 import time
 
 
+def _play_custom_audio(account_dir, index_key):
+    base_path = f"./data/{account_dir}/tts"
+    wav_path = os.path.abspath(os.path.join(base_path, f"{index_key}.wav"))
+
+    if os.path.exists(wav_path):
+        try:
+            import wave
+            import simpleaudio as sa
+
+            with wave.open(wav_path, "rb") as wf:
+                channels = wf.getnchannels()
+                sampwidth = wf.getsampwidth()
+                framerate = wf.getframerate()
+                raw = wf.readframes(wf.getnframes())
+            play_obj = sa.play_buffer(raw, channels, sampwidth, framerate)
+            play_obj.wait_done()
+            return True
+        except Exception as e:
+            print(f"Error playing custom wav {wav_path}: {e}")
+
+    print(f"No custom audio found for index={index_key} under {base_path}")
+    return False
+
+
 def check_tts_conditions(instance, tts_config, current_db, current_pause_duration,
                          left, total_stop, total, real_read_time, max_db, efficiency):
     """根据 tts_config 中的各条件，决定是否触发 TTS 播报。"""
@@ -64,15 +88,29 @@ def check_tts_conditions(instance, tts_config, current_db, current_pause_duratio
             volume = config.get("volume", "1.0")
             rate = config.get("rate", "1.0")
             voice = config.get("voice", "")
+            account_dir = getattr(instance, "current_acount", "default")
 
             if source == "web":
                 from readalaud.tts.web_tts import play_cached_web_tts
-                account_dir = getattr(instance, "current_acount", "default")
                 base_path = f"./data/{account_dir}/tts"
-                file_path = os.path.abspath(os.path.join(base_path, f"{index_key}.mp3"))
+                file_path = os.path.abspath(os.path.join(base_path, f"{index_key}.wav"))
                 threading.Thread(
                     target=play_cached_web_tts,
                     args=(text, volume, rate, file_path),
+                ).start()
+            elif source in ("custom_upload", "custom_record", "custom"):
+                def _play_custom_or_fallback():
+                    ok = _play_custom_audio(account_dir, index_key)
+                    if not ok and str(text).strip():
+                        try:
+                            from readalaud.tts.local_tts import speak
+                            speak(text=str(text), volume=float(volume), speed=float(rate), voice_name=str(voice))
+                        except Exception as e:
+                            print(f"Custom source fallback failed for {index_key}: {e}")
+
+                threading.Thread(
+                    target=_play_custom_or_fallback,
+                    daemon=True,
                 ).start()
             else:
                 from readalaud.tts.local_tts import speak
