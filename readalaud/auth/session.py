@@ -7,7 +7,121 @@ import os
 import shutil
 import hashlib
 import secrets
+import time
 from .account_io import load_accounts, save_accounts, ensure_user_dir, DEFAULT_SETTINGS
+
+
+LOGIN_LOCK_DURATIONS = [30, 60, 300, 600, 3600, 10800, 86400]
+
+
+def _set_login_ui_status(self, message, level="info"):
+    try:
+        self.set_login_status(message, level)
+    except Exception:
+        pass
+
+
+def _start_login_lock_ui_countdown(self, encoded_account, locked_until_ts):
+    try:
+        self.start_login_lock_countdown(encoded_account, locked_until_ts)
+    except Exception:
+        pass
+
+
+def _stop_login_lock_ui_countdown(self):
+    try:
+        self.stop_login_lock_countdown()
+    except Exception:
+        pass
+
+
+def _format_duration(seconds):
+    seconds = max(0, int(seconds))
+    if seconds < 60:
+        return f"{seconds}秒"
+    if seconds < 3600:
+        mins, sec = divmod(seconds, 60)
+        return f"{mins}分{sec}秒" if sec else f"{mins}分钟"
+    if seconds < 86400:
+        hours, rem = divmod(seconds, 3600)
+        mins = rem // 60
+        return f"{hours}小时{mins}分钟" if mins else f"{hours}小时"
+    days, rem = divmod(seconds, 86400)
+    hours = rem // 3600
+    return f"{days}天{hours}小时" if hours else f"{days}天"
+
+
+def _get_login_guard(read_json):
+    guard = read_json.setdefault("login_guard", {})
+    if not isinstance(guard, dict):
+        read_json["login_guard"] = {}
+        return read_json["login_guard"]
+    return guard
+
+
+def _get_account_guard_state(read_json, encoded_account):
+    guard = _get_login_guard(read_json)
+    state = guard.get(encoded_account, {})
+    if not isinstance(state, dict):
+        state = {}
+    fail_count = int(state.get("fail_count", 0) or 0)
+    lock_level = int(state.get("lock_level", 0) or 0)
+    locked_until = float(state.get("locked_until", 0) or 0)
+    return {
+        "fail_count": max(0, fail_count),
+        "lock_level": max(0, lock_level),
+        "locked_until": max(0.0, locked_until),
+    }
+
+
+def _save_account_guard_state(read_json, encoded_account, state):
+    guard = _get_login_guard(read_json)
+    guard[encoded_account] = {
+        "fail_count": int(max(0, state.get("fail_count", 0))),
+        "lock_level": int(max(0, state.get("lock_level", 0))),
+        "locked_until": float(max(0.0, state.get("locked_until", 0))),
+    }
+
+
+def _is_account_locked(read_json, encoded_account):
+    state = _get_account_guard_state(read_json, encoded_account)
+    now_ts = time.time()
+    if state["locked_until"] > now_ts:
+        return True, int(state["locked_until"] - now_ts), state
+    return False, 0, state
+
+
+def _record_login_failure(self, encoded_account, read_json):
+    state = _get_account_guard_state(read_json, encoded_account)
+    state["fail_count"] += 1
+    should_lock = (state["fail_count"] % 5 == 0)
+    remain_to_lock = 5 - (state["fail_count"] % 5)
+
+    lock_seconds = 0
+    if should_lock:
+        if state["fail_count"] == 5:
+            state["lock_level"] = 0
+        else:
+            state["lock_level"] = min(state["lock_level"] + 1, len(LOGIN_LOCK_DURATIONS) - 1)
+        lock_seconds = LOGIN_LOCK_DURATIONS[state["lock_level"]]
+        state["locked_until"] = time.time() + lock_seconds
+
+    _save_account_guard_state(read_json, encoded_account, state)
+    try:
+        save_accounts(read_json)
+    except Exception as e:
+        self.log_error("登录限制状态保存失败", str(e))
+
+    return state, should_lock, lock_seconds, remain_to_lock
+
+
+def _clear_login_failures(self, encoded_account, read_json):
+    state = {"fail_count": 0, "lock_level": 0, "locked_until": 0}
+    _save_account_guard_state(read_json, encoded_account, state)
+    try:
+        save_accounts(read_json)
+    except Exception as e:
+        self.log_error("重置登录限制状态失败", str(e))
 
 
 def bind_auth(instance):
@@ -23,14 +137,14 @@ def _login_and_sign_up(self):
     get_input_password = self.login_password_enter.get()
     if not get_input_acount:
         self.log_warning("登录未执行", "用户名为空")
-        self.gui.warning(message="必须输入用户名!", title="警告")
+        _set_login_ui_status(self, "必须输入用户名", "warning")
         return
 
     try:
         read_json = load_accounts()
     except Exception as e:
         self.log_error("读取账户失败", str(e))
-        self.gui.error(message=f"无法创建数据文件夹: {e}")
+        _set_login_ui_status(self, f"读取账户失败：{e}", "error")
         return
 
     read_names = read_json.get("names", [])
@@ -74,12 +188,28 @@ def _register_new_account(self, username, password, read_json):
         print(e)
         self.gui.error(message="出错啦!无法创建文件夹！\n可能是因为文件夹已存在或权限问题！")
         return
-    self.gui.info(message="账号注册成功", title="成功注册新账号！")
+    _set_login_ui_status(self, "账号注册成功，正在登录...", "success")
     _try_login(self, encode_acount, password, read_json, read_json["passwords"])
     self.log_success("注册成功", f"注册了账户 {username}")
 
 def _try_login(self, encoded_account, raw_password, read_json, read_passwords):
     self.log_operation("调用登录校验", f"账户: {encoded_account}")
+    is_locked, remain_seconds, lock_state = _is_account_locked(read_json, encoded_account)
+    if is_locked:
+        self.log_warning("登录受限", f"账户处于锁定期，剩余 {_format_duration(remain_seconds)}")
+        _set_login_ui_status(self, f"登录失败次数过多，请在 {_format_duration(remain_seconds)} 后重试", "warning")
+        _start_login_lock_ui_countdown(self, encoded_account, lock_state.get("locked_until", 0))
+        return
+
+    if lock_state.get("locked_until", 0) > 0 and remain_seconds <= 0:
+        lock_state["locked_until"] = 0
+        _save_account_guard_state(read_json, encoded_account, lock_state)
+        try:
+            save_accounts(read_json)
+        except Exception:
+            pass
+        _stop_login_lock_ui_countdown(self)
+
     stored_password = read_passwords[encoded_account]
 
     if "$" in stored_password:
@@ -103,8 +233,18 @@ def _try_login(self, encoded_account, raw_password, read_json, read_passwords):
 
     if not is_valid:
         self.log_warning("登录失败", "密码错误")
-        self.gui.info(message="密码错误！", title="密码错误!")
+        state, just_locked, lock_seconds, remain_to_lock = _record_login_failure(self, encoded_account, read_json)
+        if just_locked:
+            self.log_warning("登录锁定触发", f"失败 {state['fail_count']} 次，锁定 {_format_duration(lock_seconds)}")
+            _set_login_ui_status(self, f"密码错误，已锁定 {_format_duration(lock_seconds)}", "warning")
+            _start_login_lock_ui_countdown(self, encoded_account, state.get("locked_until", 0))
+        else:
+            _set_login_ui_status(self, f"密码错误，再失败 {remain_to_lock} 次将触发下一档锁定", "error")
         return
+
+    _clear_login_failures(self, encoded_account, read_json)
+    _stop_login_lock_ui_countdown(self)
+    _set_login_ui_status(self, "登录成功", "success")
 
     # Migrate legacy base64 or unsalted sha256 to salted hash
     if "$" not in stored_password:

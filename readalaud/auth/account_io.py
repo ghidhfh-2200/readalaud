@@ -6,7 +6,7 @@ import os
 
 
 ACCOUNTS_PATH = "./data/acounts.json"
-DEFAULT_ACCOUNTS = {"names": [], "passwords": {}}
+DEFAULT_ACCOUNTS = {"names": [], "passwords": {}, "login_guard": {}}
 DEFAULT_SETTINGS = {"goal": 0, "stop-dur": 0, "db-level": 0, "calibration": 94, "theme": "darkly", "if_tts": 0}
 
 
@@ -25,6 +25,7 @@ def load_accounts():
             data = json.load(f)
         data.setdefault("names", [])
         data.setdefault("passwords", {})
+        data.setdefault("login_guard", {})
         return data
     except (json.JSONDecodeError, FileNotFoundError):
         return {"names": [], "passwords": {}}

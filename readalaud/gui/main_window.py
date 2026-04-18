@@ -124,6 +124,11 @@ def check_if_reading(self):
 # ──────────────────────── 欢迎页 / 导航 ────────────────────────
 
 def _welcome_page(self, destroy_window):
+    if destroy_window[1] == "login":
+        try:
+            self.stop_login_lock_countdown()
+        except Exception:
+            pass
     destroy_window[0].destroy()
     if destroy_window[1] == "login":
         self.if_login_show = False

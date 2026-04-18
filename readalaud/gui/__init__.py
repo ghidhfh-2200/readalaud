@@ -17,7 +17,12 @@ from .main_window import (
   _start_sidebar_today_status_monitor,
   _stop_sidebar_today_status_monitor,
 )
-from .login_gui import _generate_login_gui
+from .login_gui import (
+  _generate_login_gui,
+  _set_login_status,
+  _start_login_lock_countdown,
+  _stop_login_lock_countdown,
+)
 from .settings_gui import _generate_settings_gui
 from .tts_gui import (
     _enable_or_disable_tts_gui,
@@ -42,6 +47,9 @@ def bind_gui(instance):
     instance._start_sidebar_today_status_monitor = lambda: _start_sidebar_today_status_monitor(instance)
     instance._stop_sidebar_today_status_monitor = lambda reset=True: _stop_sidebar_today_status_monitor(instance, reset=reset)
     instance.generate_login_gui = lambda: _generate_login_gui(instance)
+    instance.set_login_status = lambda message, level="info": _set_login_status(instance, message, level)
+    instance.start_login_lock_countdown = lambda encoded_account, locked_until_ts: _start_login_lock_countdown(instance, encoded_account, locked_until_ts)
+    instance.stop_login_lock_countdown = lambda: _stop_login_lock_countdown(instance)
     instance.generate_settings_gui = lambda: _generate_settings_gui(instance)
     instance.generate_reading_gui = lambda: _generate_reading_gui(instance)
     instance.enable_or_disable_tts_gui = lambda state=None: _enable_or_disable_tts_gui(instance, state)
