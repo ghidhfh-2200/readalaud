@@ -101,10 +101,11 @@ ReadAlaud/
 
     # TTS 模块
     tts/
-        __init__.py       # 导出 bind_tts, speak, play_mp3_win32, test_tts, get_web_voices
+        __init__.py       # 导出 bind_tts, speak, test_tts, get_web_voices 等
         local_tts.py      # 本地 pyttsx3 合成
-        web_tts.py        # edge-tts 调用与缓存播放
+        web_tts.py        # edge-tts 调用与 WAV 缓存播放
         voice_list.py     # 语音列表与 Web 声线获取
+        playback_control.py # 全局播放控制与停止信号管理
 
     # 本地服务器与进程管理
     server/
