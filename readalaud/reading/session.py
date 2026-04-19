@@ -101,6 +101,13 @@ def reading_data_get_and_check(self):
             month_str = "-".join(get_date.split("-")[0:2])
             with open(f"./data/{self.current_acount}/{month_str}/{get_date}.json", "r", encoding="utf-8") as f:
                 self.read_today_data = json.load(f)
+                # 重新计算剩余时长：当朗读目标不为零时，使用目标 - 已读时间
+                goal = float(self.load_settings.get("goal", 0) or 0)
+                real_read_time = float(self.read_today_data.get("real_read_time", 0) or 0)
+                if goal > 0:
+                    self.read_today_data["left"] = max(0, goal - real_read_time)
+                else:
+                    self.read_today_data["left"] = 0
                 try:
                     self.information_label_list[0].configure(text=f"剩余时长: {datetime.timedelta(seconds=float(self.read_today_data['left']))}")
                     self.information_label_list[1].configure(text=f"停顿总时长: {datetime.timedelta(seconds=float(self.read_today_data['stop_total']))}")

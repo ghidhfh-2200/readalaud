@@ -83,7 +83,7 @@ def fetch_for_daily_data(self, date_input, force_refresh=False):
         result["pause_duration"] = int(data.get("stop_total", 0))
         result["efficiency"] = float(data.get("efficiency", 0.0))
         real_read_time = data.get("real_read_time", 0)
-        result["completion"] = f"{(real_read_time / get_goal) * 100:.1f}%" if get_goal else "-"
+        result["completion"] = f"{(real_read_time / get_goal) * 100:.1f}%" if get_goal > 0 else "None"
         result["max_volume"] = float(data.get("max_sound", 0.0))
     except Exception as e:
         print(f"Error reading daily json: {e}")

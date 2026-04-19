@@ -112,7 +112,7 @@ def data_thread(ipc_queue, ui_queue, instance):
                         write_db_data(db_list=db_list, acount=getattr(instance, "current_acount"), date=datetime.datetime.now().strftime("%Y-%m-%d"))
                         write_count = 0
                         db_list = []
-                    instance.read_today_data["left"] = float(instance.read_today_data["left"]) - time_delta
+                    instance.read_today_data["left"] = max(0, float(instance.read_today_data["left"]) - time_delta)
                     instance.read_today_data["real_read_time"] = float(instance.read_today_data["real_read_time"]) + time_delta
                     should_update_stats = True
 
