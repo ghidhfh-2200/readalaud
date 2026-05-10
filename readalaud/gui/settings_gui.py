@@ -220,8 +220,10 @@ def _build_tts_settings_section(self, read_frame):
     )
     self.tts_tree.bind(
         "<<TreeviewSelect>>",
-        lambda event: on_treeview_click(
-            self, event, self.tts_tree.item(self.tts_tree.selection()[0], "values")
+        lambda event: (
+            on_treeview_click(
+                self, event, self.tts_tree.item(sel[0], "values")
+            ) if (sel := self.tts_tree.selection()) else None
         ),
     )
     # Configure columns
