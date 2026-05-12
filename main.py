@@ -36,10 +36,12 @@ def show_splash_and_start():
         if ICON_PATH.exists():
             img = Image.open(ICON_PATH).convert("RGBA")
             target_size = int(min(width, height) * 0.72)
-            img.thumbnail((target_size, target_size), Image.LANCZOS)
+            img.thumbnail((target_size, target_size), Image.Resampling.LANCZOS)
             icon_image = ImageTk.PhotoImage(img)
             label = tk.Label(splash, image=icon_image, bg="white")
-            label.image = icon_image  # 防止被垃圾回收
+            # 保持对icon_image的引用，防止被垃圾回收
+            global _splash_icon_image_ref
+            _splash_icon_image_ref = icon_image
             TextLabel = tk.Label(splash, text="告别摸鱼偷懒\n回归大声早读", fg="black", bg="white", font=("宋体", 14))
             TextLabel.pack()
         else:

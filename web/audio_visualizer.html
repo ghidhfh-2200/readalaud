@@ -205,6 +205,12 @@
             URL.revokeObjectURL(workerBlobURL);
             workerBlobURL = null;
         }
+
+        // Clear WebSocket reconnection timer
+        if (wsReconnectTimer !== null) {
+            clearTimeout(wsReconnectTimer);
+            wsReconnectTimer = null;
+        }
         
         // Clean up Streaming
         if (audioProcessor) {
@@ -213,12 +219,14 @@
             audioProcessor = null;
         }
         if (audioSocket) {
+            audioSocket.onclose = null; // Prevent reconnection on intentional close
             audioSocket.close();
             audioSocket = null;
         }
         
         // Clear reusable buffers
         pcmBuffer = null;
+        wsReconnectAttempts = 0;
 
         isActive = false;
     }
@@ -302,6 +310,42 @@
         }
     }
     let count = 0
+    let wsReconnectTimer = null;
+    let wsReconnectAttempts = 0;
+    const WS_MAX_RECONNECT_ATTEMPTS = 10;
+    const WS_RECONNECT_DELAY = 1000; // 1 second initial delay
+
+    // Create WebSocket with automatic reconnection
+    function connectWebSocket() {
+        if (audioSocket && (audioSocket.readyState === WebSocket.OPEN || audioSocket.readyState === WebSocket.CONNECTING)) {
+            return; // Already connected or connecting
+        }
+
+        audioSocket = new WebSocket("ws://127.0.0.1:8008/audio_stream");
+        wsReconnectAttempts++;
+
+        audioSocket.onopen = () => {
+            console.log("Audio Stream Connected");
+            wsReconnectAttempts = 0; // Reset on successful connection
+        };
+
+        audioSocket.onerror = (e) => {
+            console.error("WebSocket Error:", e);
+        };
+
+        audioSocket.onclose = (event) => {
+            console.log("WebSocket closed:", event.code, event.reason);
+            // Attempt reconnection if reading is still active
+            if (isActive && wsReconnectAttempts < WS_MAX_RECONNECT_ATTEMPTS) {
+                const delay = WS_RECONNECT_DELAY * Math.min(wsReconnectAttempts, 5);
+                console.log(`WebSocket reconnecting in ${delay}ms (attempt ${wsReconnectAttempts})...`);
+                wsReconnectTimer = setTimeout(connectWebSocket, delay);
+            } else if (wsReconnectAttempts >= WS_MAX_RECONNECT_ATTEMPTS) {
+                console.error("WebSocket max reconnection attempts reached");
+            }
+        };
+    }
+
     // Modify startMic to send data to the worker
     async function startMic() {
         try {
@@ -321,11 +365,7 @@
             microphone.connect(analyser);
 
             // --- STREAMING LOGIC ---
-            if (!audioSocket || audioSocket.readyState === WebSocket.CLOSED) {
-                audioSocket = new WebSocket("ws://127.0.0.1:8008/audio_stream");
-                audioSocket.onopen = () => console.log("Audio Stream Connected");
-                audioSocket.onerror = (e) => console.error("WebSocket Error:", e);
-            }
+            connectWebSocket();
 
             if (audioProcessor) {
                 audioProcessor.disconnect();
