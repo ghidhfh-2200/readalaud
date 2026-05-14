@@ -2,9 +2,10 @@
 登录 / 注册页面 GUI。
 """
 
-import tkinter as tk
 import threading
 import time
+from PySide6 import QtCore, QtWidgets, QtGui
+from .qt_helpers import ValueHolder, run_on_ui
 
 
 def _set_login_status(self, message, level="info"):
@@ -21,7 +22,7 @@ def _set_login_status(self, message, level="info"):
         if hasattr(self, "login_status_var") and self.login_status_var is not None:
             self.login_status_var.set(message)
         if hasattr(self, "login_status_label") and self.login_status_label is not None:
-            self.login_status_label.config(fg=color)
+            self.login_status_label.setStyleSheet(f"color: {color};")
     except Exception:
         pass
 
@@ -78,8 +79,7 @@ def _start_login_lock_countdown(self, encoded_account, locked_until_ts):
 
     def _post_status(msg, level):
         try:
-            if hasattr(self, "main_window") and self.main_window.winfo_exists():
-                self.main_window.after(0, lambda: _set_login_status(self, msg, level))
+            run_on_ui(lambda: _set_login_status(self, msg, level))
         except Exception:
             pass
 
@@ -93,73 +93,81 @@ def _generate_login_gui(self):
     else:
         self.if_login_show = True
 
-    self.login_frame = tk.Frame(master=self.main_window)
-    self.main_paned_window.add(self.login_frame)
+    self.login_frame = QtWidgets.QWidget()
+    self.login_layout = QtWidgets.QVBoxLayout(self.login_frame)
+    self.login_layout.setContentsMargins(10, 10, 10, 10)
+    self.main_paned_window.addWidget(self.login_frame, 7)
     # empty the previous frame
     if self.if_main_window_show == True:
-        self.content_frame.destroy()
+        self.content_frame.deleteLater()
         self.if_main_window_show = False
     elif self.if_settings_show == True:
-        self.settings_frame.destroy()
+        self.settings_frame.deleteLater()
         self.if_settings_show = False
     elif self.if_reading_show == True:
-        self.reading_frame.destroy()
+        self.reading_frame.deleteLater()
         self.if_reading_show = False
     self.if_login_show = True
 
-    instruection_label = tk.Label(
-        master=self.login_frame,
-        text="请输入账号&密码（没有密码无需输入）\n新账号自动注册",
-        font=self.font,
-    )
-    instruection_label.place(rely=0.4, anchor=tk.CENTER, relx=0.5)
+    instruection_label = QtWidgets.QLabel("请输入账号&密码（没有密码无需输入）\n新账号自动注册")
+    instruection_label.setFont(QtGui.QFont(self.font[0], self.font[1]))
+    instruection_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+    self.login_layout.addStretch(1)
+    self.login_layout.addWidget(instruection_label)
 
-    self.login_status_var = tk.StringVar(value="请输入账号和密码")
-    self.login_status_label = tk.Label(
-        master=self.login_frame,
-        textvariable=self.login_status_var,
-        font=("微软雅黑", 10),
-        fg="#6c757d",
-    )
-    self.login_status_label.place(rely=0.46, anchor=tk.CENTER, relx=0.5)
+    self.login_status_var = ValueHolder("请输入账号和密码")
+    self.login_status_label = QtWidgets.QLabel(self.login_status_var.get())
+    self.login_status_label.setFont(QtGui.QFont("微软雅黑", 10))
+    self.login_status_label.setStyleSheet("color: #6c757d;")
+    self.login_status_var.changed.connect(self.login_status_label.setText)
+    self.login_layout.addWidget(self.login_status_label)
 
-    # enter username label frame
-    enter_user_name = tk.LabelFrame(master=self.login_frame, padx=5, pady=5, border=0, width=50)
-    enter_user_name.place(rely=0.52, relx=0.5, anchor=tk.CENTER)
-    self.login_enter_acount_label = tk.Label(
-        master=enter_user_name, text="用户名：", font=("微软雅黑", 14)
-    )
-    self.login_enter_acount_label.pack(side=tk.LEFT)
-    self.login_enter_acount_name = tk.Entry(
-        master=enter_user_name, width=30, font=("微软雅黑", 14), textvariable=self.login_acount_enter
-    )
-    self.login_enter_acount_name.pack(side=tk.RIGHT)
+    # enter username row
+    enter_user_name = QtWidgets.QWidget()
+    enter_user_layout = QtWidgets.QHBoxLayout(enter_user_name)
+    enter_user_layout.setContentsMargins(0, 0, 0, 0)
+    self.login_enter_acount_label = QtWidgets.QLabel("用户名：")
+    self.login_enter_acount_label.setFont(QtGui.QFont("微软雅黑", 14))
+    self.login_enter_acount_name = QtWidgets.QLineEdit()
+    self.login_enter_acount_name.setFont(QtGui.QFont("微软雅黑", 14))
+    self.login_enter_acount_name.setMinimumWidth(260)
+    if isinstance(self.login_acount_enter, ValueHolder):
+        self.login_enter_acount_name.setText(self.login_acount_enter.get() or "")
+        self.login_enter_acount_name.textChanged.connect(self.login_acount_enter.set)
+    enter_user_layout.addWidget(self.login_enter_acount_label)
+    enter_user_layout.addWidget(self.login_enter_acount_name)
+    self.login_layout.addWidget(enter_user_name)
 
-    # enter password label frame
-    enter_password = tk.LabelFrame(master=self.login_frame, border=0, padx=5, pady=5, width=50)
-    enter_password.place(anchor=tk.CENTER, relx=0.5, rely=0.59)
-    self.login_enter_password_label = tk.Label(
-        master=enter_password, text="密码：", font=("微软雅黑", 14)
-    )
-    self.login_enter_password_label.pack(side=tk.LEFT)
-    self.login_enter_password_entry = tk.Entry(
-        master=enter_password, width=30, font=("微软雅黑", 14), textvariable=self.login_password_enter,show="*"
-    )
-    self.login_enter_password_entry.pack(side=tk.RIGHT)
+    # enter password row
+    enter_password = QtWidgets.QWidget()
+    enter_pwd_layout = QtWidgets.QHBoxLayout(enter_password)
+    enter_pwd_layout.setContentsMargins(0, 0, 0, 0)
+    self.login_enter_password_label = QtWidgets.QLabel("密码：")
+    self.login_enter_password_label.setFont(QtGui.QFont("微软雅黑", 14))
+    self.login_enter_password_entry = QtWidgets.QLineEdit()
+    self.login_enter_password_entry.setFont(QtGui.QFont("微软雅黑", 14))
+    self.login_enter_password_entry.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
+    self.login_enter_password_entry.setMinimumWidth(260)
+    if isinstance(self.login_password_enter, ValueHolder):
+        self.login_enter_password_entry.setText(self.login_password_enter.get() or "")
+        self.login_enter_password_entry.textChanged.connect(self.login_password_enter.set)
+    enter_pwd_layout.addWidget(self.login_enter_password_label)
+    enter_pwd_layout.addWidget(self.login_enter_password_entry)
+    self.login_layout.addWidget(enter_password)
 
-    # button label frame
-    login_button = tk.LabelFrame(master=self.login_frame, border=0, padx=5, pady=5)
-    login_button.place(relx=0.5, rely=0.66, anchor="center")
-    # login_and_sign_up 定义在 auth 模块
-    self.login_button = tk.Button(
-        master=login_button, text="登录/注册", width=15,
-        command=lambda: self.login_and_sign_up(),
-    )
-    self.login_button.pack(side=tk.LEFT)
-    self.cancel_button = tk.Button(
-        master=login_button, text="取消", width=15,
-        command=lambda: self.welcome_page(destroy_window=[self.login_frame, "login"]),
-    )
-    self.cancel_button.pack(side=tk.RIGHT)
+    # buttons
+    button_row = QtWidgets.QWidget()
+    button_layout = QtWidgets.QHBoxLayout(button_row)
+    button_layout.setContentsMargins(0, 0, 0, 0)
+    self.login_button = QtWidgets.QPushButton("登录/注册")
+    self.login_button.setFixedWidth(150)
+    self.login_button.clicked.connect(lambda: self.login_and_sign_up())
+    self.cancel_button = QtWidgets.QPushButton("取消")
+    self.cancel_button.setFixedWidth(150)
+    self.cancel_button.clicked.connect(lambda: self.welcome_page(destroy_window=[self.login_frame, "login"]))
+    button_layout.addWidget(self.login_button)
+    button_layout.addWidget(self.cancel_button)
+    self.login_layout.addWidget(button_row)
+    self.login_layout.addStretch(1)
 
-    self.login_frame.bind("<Destroy>", lambda _e: _stop_login_lock_countdown(self))
+    self.login_frame.destroyed.connect(lambda _e=None: _stop_login_lock_countdown(self))

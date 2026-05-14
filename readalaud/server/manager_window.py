@@ -1,12 +1,12 @@
 """
-manager_window.py —— 服务器管理 Tkinter 窗口。
+manager_window.py —— 服务器管理窗口。
 """
 import sys
 import subprocess
 import platform
 import threading
 import re
-import tkinter as tk
+from PySide6 import QtCore, QtWidgets, QtGui
 from ..gui.gui_service import get_gui_service
 
 from .process_manager import check_if_server_running, server_pid, end_server_process
@@ -40,11 +40,11 @@ def _shutdown_server_op():
 
 
 def _kill_selected_task_op(listbox):
-    selection = listbox.curselection()
-    if not selection:
+    row = listbox.currentRow()
+    if row < 0:
         get_gui_service().info("请选择一个进程", title="提示")
         return
-    item = listbox.get(selection[0])
+    item = listbox.item(row).text()
     match = re.search(r"PID:\s*(\d+)", item)
     if match:
         pid = int(match.group(1))
@@ -67,23 +67,23 @@ def _roll_check(self, event, task_list=None, pid_lbl=None):
         try:
             def update_ui(s_text=server_text, items=list_items, c_pid=current_pid):
                 label = getattr(self, "state_label", None)
-                if label and label.winfo_exists():
-                    label.configure(text=s_text)
-                if task_list and task_list.winfo_exists():
-                    current_items = task_list.get(0, tk.END)
+                if label:
+                    label.setText(s_text)
+                if task_list:
+                    current_items = [task_list.item(i).text() for i in range(task_list.count())]
                     if list(current_items) != items:
-                        task_list.delete(0, tk.END)
+                        task_list.clear()
                         for i in items:
-                            task_list.insert(tk.END, i)
-                if pid_lbl and pid_lbl.winfo_exists():
+                            task_list.addItem(i)
+                if pid_lbl:
                     pid_text = f"进程ID: {c_pid}" if c_pid else "进程ID: -"
-                    if pid_lbl.cget("text") != pid_text:
-                        pid_lbl.configure(text=pid_text)
+                    if pid_lbl.text() != pid_text:
+                        pid_lbl.setText(pid_text)
 
             label_widget = getattr(self, "state_label", None)
-            if label_widget and label_widget.winfo_exists():
-                label_widget.after(0, update_ui)
-        except tk.TclError:
+            if label_widget:
+                QtCore.QTimer.singleShot(0, update_ui)
+        except Exception:
             pass
 
         event.wait(1)
@@ -101,8 +101,8 @@ def _start_state_roll_check(self, task_list=None, pid_lbl=None):
 def _on_exit(event, root):
     event.set()
     try:
-        root.destroy()
-    except tk.TclError:
+        root.close()
+    except Exception:
         pass
 
 
@@ -120,43 +120,53 @@ def start_manager(self=None):
             center=True,
         )
     else:
-        server_manager_window = tk.Tk()
+        server_manager_window = QtWidgets.QWidget()
         try:
-            server_manager_window.iconbitmap("./assets/icon.ico")
+            server_manager_window.setWindowIcon(QtGui.QIcon("./assets/icon.ico"))
         except Exception:
             pass
-        server_manager_window.title("服务器管理")
-        server_manager_window.geometry("300x400")
+        server_manager_window.setWindowTitle("服务器管理")
+        server_manager_window.resize(300, 400)
 
-    state_label_frame = tk.LabelFrame(master=server_manager_window, width=270, height=30, border=1, text="服务器状态")
-    state_label_frame.pack(padx=5, pady=5, fill="x")
+    layout = QtWidgets.QVBoxLayout(server_manager_window)
+    state_label_frame = QtWidgets.QGroupBox("服务器状态")
+    state_layout = QtWidgets.QVBoxLayout(state_label_frame)
+    layout.addWidget(state_label_frame)
     if self:
-        self.state_label = tk.Label(master=state_label_frame, fg="black", text="正在查询...", font=(25))
-        self.state_label.pack(anchor="center", fill="both")
+        self.state_label = QtWidgets.QLabel("正在查询...")
+        self.state_label.setFont(QtGui.QFont("微软雅黑", 16))
+        self.state_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        state_layout.addWidget(self.state_label)
 
-    operation = tk.LabelFrame(master=server_manager_window, width=270, border=1, text="服务器操作")
-    operation.pack(padx=5, pady=5, fill="x")
-    tk.Button(master=operation, text="启动服务器", width=260, height=1, command=_start_server_op).pack(padx=5, pady=5)
-    tk.Button(master=operation, text="关闭服务器", width=260, height=1, command=_shutdown_server_op).pack(padx=5, pady=5)
+    operation = QtWidgets.QGroupBox("服务器操作")
+    operation_layout = QtWidgets.QVBoxLayout(operation)
+    layout.addWidget(operation)
+    start_btn = QtWidgets.QPushButton("启动服务器")
+    start_btn.clicked.connect(_start_server_op)
+    stop_btn = QtWidgets.QPushButton("关闭服务器")
+    stop_btn.clicked.connect(_shutdown_server_op)
+    operation_layout.addWidget(start_btn)
+    operation_layout.addWidget(stop_btn)
 
-    task_manager = tk.LabelFrame(master=server_manager_window, text="端口占用进程管理", width=270, border=1)
-    task_manager.pack(padx=5, pady=5, fill="x")
-    task_list = tk.Listbox(master=task_manager, width=260, height=6)
-    task_list.pack(padx=5, pady=5, fill="x")
-    tk.Button(
-        master=operation, text="结束选中进程", width=260, height=1,
-        command=lambda: _kill_selected_task_op(task_list),
-    ).pack(padx=5, pady=5)
+    task_manager = QtWidgets.QGroupBox("端口占用进程管理")
+    task_layout = QtWidgets.QVBoxLayout(task_manager)
+    layout.addWidget(task_manager)
+    task_list = QtWidgets.QListWidget()
+    task_layout.addWidget(task_list)
+    kill_btn = QtWidgets.QPushButton("结束选中进程")
+    kill_btn.clicked.connect(lambda: _kill_selected_task_op(task_list))
+    task_layout.addWidget(kill_btn)
 
-    detail_show = tk.LabelFrame(master=task_manager, width=260, border=0)
-    detail_show.pack(padx=5, pady=5, fill="x")
-    pid_lbl = tk.Label(master=detail_show, text="进程ID", width=270, height=1, justify="left", anchor="w")
-    pid_lbl.pack()
+    detail_show = QtWidgets.QWidget()
+    detail_layout = QtWidgets.QVBoxLayout(detail_show)
+    pid_lbl = QtWidgets.QLabel("进程ID")
+    detail_layout.addWidget(pid_lbl)
+    task_layout.addWidget(detail_show)
 
     if self:
         self.task_list = task_list
         self.pid_lbl = pid_lbl
 
     _start_state_roll_check(self=self, task_list=task_list, pid_lbl=pid_lbl)
-    server_manager_window.protocol("WM_DELETE_WINDOW", lambda: _on_exit(self.event, server_manager_window))
-    server_manager_window.mainloop()
+    server_manager_window.destroyed.connect(lambda _e=None: _on_exit(self.event, server_manager_window))
+    server_manager_window.show()

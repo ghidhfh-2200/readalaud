@@ -6,7 +6,7 @@ import json
 import base64
 import os
 import secrets
-import tkinter as tk
+from PySide6 import QtCore, QtWidgets
 
 from .tts_settings import save_tts_settings
 
@@ -78,7 +78,11 @@ def _load_settings(self):
                     elif key == "voice":     voice = values
                     elif key == "source":    source = values
                 trigger_text = display if display else f"{condition} {value}".strip()
-                self.tts_tree.insert("", tk.END, values=(trigger_text, text, rate, volume, voice, source or "local"))
+                row = self.tts_tree.rowCount()
+                self.tts_tree.insertRow(row)
+                values = [trigger_text, text, rate, volume, voice, source or "local"]
+                for c, v in enumerate(values):
+                    self.tts_tree.setItem(row, c, QtWidgets.QTableWidgetItem(str(v)))
         except Exception:
             self.log_error("加载 TTS 设置失败", "tts_config.json 不可读或格式错误")
             pass
@@ -116,14 +120,15 @@ def _popup_auth_confirm(self, option):
         center=True,
     )
 
-    tk.Label(dialog, text="请输入当前账号密码以继续：", font=("微软雅黑", 10)).pack(pady=10)
-    pwd_var = tk.StringVar()
-    entry = tk.Entry(dialog, textvariable=pwd_var, show="*", width=25)
-    entry.pack(pady=5)
-    entry.focus_set()
+    layout = QtWidgets.QVBoxLayout(dialog)
+    layout.addWidget(QtWidgets.QLabel("请输入当前账号密码以继续："))
+    pwd_var = QtWidgets.QLineEdit()
+    pwd_var.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
+    layout.addWidget(pwd_var)
+    pwd_var.setFocus()
 
     def on_confirm(event=None):
-        pwd = pwd_var.get()
+        pwd = pwd_var.text()
         if not pwd:
             self.log_warning("敏感操作认证未通过", "密码为空")
             self.gui.warning("密码不能为空", title="提示", parent=dialog)
@@ -140,9 +145,16 @@ def _popup_auth_confirm(self, option):
             self.gui.error("密码错误", title="认证失败", parent=dialog)
             self.log_audit("敏感操作认证失败", f"尝试进行 {option} 修改时密码验证失败")
 
-    btn = tk.Button(dialog, text="验证", command=on_confirm, width=10)
-    btn.pack(pady=10)
-    dialog.bind("<Return>", on_confirm)
+    btn = QtWidgets.QPushButton("验证")
+    btn.clicked.connect(on_confirm)
+    layout.addWidget(btn)
+    def _key_press_event(e):
+        if e.key() == QtCore.Qt.Key.Key_Return:
+            on_confirm()
+        else:
+            QtWidgets.QDialog.keyPressEvent(dialog, e)
+
+    dialog.keyPressEvent = _key_press_event
 
 
 def _verify_current_password(self, input_pwd):
@@ -289,6 +301,6 @@ def _change_theme(self):
         read_settings["theme"] = get_selected
         with open(settings_path, "w") as f:
             json.dump(read_settings, f)
-    except tk.TclError:
+    except Exception:
         self.log_error("主题切换失败", "Tk 组件状态异常")
         self.gui.error(message="请先选择一个样式")

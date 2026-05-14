@@ -13,8 +13,9 @@ import json
 import math
 import os
 import threading
-import tkinter as tk
 from typing import Optional
+
+from PySide6 import QtCore, QtWidgets, QtGui
 
 import numpy as np
 
@@ -65,15 +66,16 @@ class _CalibrationWindowController:
     def __init__(self, owner):
         self.owner = owner
         self.gui = get_gui_service(owner)
-        self.window: Optional[tk.Toplevel] = None
+        self.window: Optional[QtWidgets.QWidget] = None
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._latest_raw_db: Optional[float] = None
 
-        self.raw_var = tk.StringVar(value="-- dB")
-        self.calibrated_var = tk.StringVar(value="-- dB")
-        self.status_var = tk.StringVar(value="准备就绪")
-        self.offset_var = tk.StringVar(value="0")
+        from ..gui.qt_helpers import ValueHolder
+        self.raw_var = ValueHolder("-- dB")
+        self.calibrated_var = ValueHolder("-- dB")
+        self.status_var = ValueHolder("准备就绪")
+        self.offset_var = ValueHolder("0")
 
     def open(self):
         current_acount = getattr(self.owner, "current_acount", "")
@@ -92,46 +94,49 @@ class _CalibrationWindowController:
             center=True,
         )
         self.owner.if_calibration_show = True
-        self.window.protocol("WM_DELETE_WINDOW", self.close)
-        self.window.bind("<Destroy>", self._on_destroy)
+        try:
+            self.window.destroyed.connect(self._on_destroy)
+        except Exception:
+            pass
 
         self._build_ui()
         self._ensure_focus()
         self._start_meter_thread()
 
     def focus(self):
-        if self.window and self.window.winfo_exists():
-            self.window.deiconify()
-            self.window.lift()
-            self.window.focus_force()
+        if self.window:
+            self.window.show()
+            self.window.raise_()
+            self.window.activateWindow()
 
     def _ensure_focus(self):
         """窗口创建后主动抢占焦点，确保可立即开始校准。"""
-        if not self.window or not self.window.winfo_exists():
+        if not self.window:
             return
 
         def _focus_once():
             if not self.window or not self.window.winfo_exists():
                 return
             try:
-                self.window.deiconify()
-                self.window.lift()
-                self.window.attributes("-topmost", True)
-                self.window.focus_force()
-                self.window.after(120, lambda: self.window and self.window.winfo_exists() and self.window.attributes("-topmost", False))
+                self.window.show()
+                self.window.raise_()
+                self.window.activateWindow()
+                self.window.setWindowFlag(QtCore.Qt.WindowType.WindowStaysOnTopHint, True)
+                self.window.show()
+                QtCore.QTimer.singleShot(120, lambda: self.window and self.window.setWindowFlag(QtCore.Qt.WindowType.WindowStaysOnTopHint, False))
             except Exception:
                 pass
 
         _focus_once()
-        self.window.after(80, _focus_once)
-        self.window.after(220, _focus_once)
+        QtCore.QTimer.singleShot(80, _focus_once)
+        QtCore.QTimer.singleShot(220, _focus_once)
 
     def close(self):
         self._stop_event.set()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=1.0)
-        if self.window and self.window.winfo_exists():
-            self.window.destroy()
+        if self.window:
+            self.window.close()
 
     def _on_destroy(self, _event=None):
         self._stop_event.set()
@@ -140,37 +145,64 @@ class _CalibrationWindowController:
 
     def _build_ui(self):
         assert self.window is not None
+        layout = QtWidgets.QVBoxLayout(self.window)
+        layout.setContentsMargins(12, 10, 12, 10)
 
-        main = tk.Frame(self.window, padx=12, pady=10)
-        main.pack(fill="both", expand=True)
+        meter_row = QtWidgets.QWidget()
+        meter_layout = QtWidgets.QHBoxLayout(meter_row)
+        meter_layout.setContentsMargins(0, 0, 0, 0)
 
-        meter_row = tk.Frame(main)
-        meter_row.pack(fill="x", pady=(0, 10))
+        raw_frame = QtWidgets.QGroupBox("校准前音量（原始）")
+        raw_layout = QtWidgets.QVBoxLayout(raw_frame)
+        raw_label = QtWidgets.QLabel(self.raw_var.get())
+        raw_label.setFont(QtGui.QFont("微软雅黑", 24, QtGui.QFont.Weight.Bold))
+        raw_label.setStyleSheet("color: #2e86de;")
+        self.raw_var.changed.connect(raw_label.setText)
+        raw_layout.addWidget(raw_label)
 
-        raw_frame = tk.LabelFrame(meter_row, text="校准前音量（原始）", padx=10, pady=10)
-        raw_frame.pack(side="left", fill="both", expand=True, padx=(0, 6))
-        tk.Label(raw_frame, textvariable=self.raw_var, font=("微软雅黑", 24, "bold"), fg="#2e86de").pack()
+        calibrated_frame = QtWidgets.QGroupBox("校准后音量（原始 + 校准值）")
+        cal_layout = QtWidgets.QVBoxLayout(calibrated_frame)
+        cal_label = QtWidgets.QLabel(self.calibrated_var.get())
+        cal_label.setFont(QtGui.QFont("微软雅黑", 24, QtGui.QFont.Weight.Bold))
+        cal_label.setStyleSheet("color: #1d6f42;")
+        self.calibrated_var.changed.connect(cal_label.setText)
+        cal_layout.addWidget(cal_label)
 
-        calibrated_frame = tk.LabelFrame(meter_row, text="校准后音量（原始 + 校准值）", padx=10, pady=10)
-        calibrated_frame.pack(side="left", fill="both", expand=True, padx=(6, 0))
-        tk.Label(calibrated_frame, textvariable=self.calibrated_var, font=("微软雅黑", 24, "bold"), fg="#1d6f42").pack()
+        meter_layout.addWidget(raw_frame)
+        meter_layout.addWidget(calibrated_frame)
+        layout.addWidget(meter_row)
 
-        input_row = tk.Frame(main)
-        input_row.pack(fill="x", pady=(2, 8))
-        tk.Label(input_row, text="校准值（dB）：", font=self.owner.mainpage_button_font).pack(side="left")
-        entry = tk.Entry(input_row, textvariable=self.offset_var, width=14, font=self.owner.mainpage_button_font)
-        entry.pack(side="left", padx=(6, 0))
-        entry.bind("<KeyRelease>", lambda _e: self._refresh_calibrated_preview())
+        input_row = QtWidgets.QWidget()
+        input_layout = QtWidgets.QHBoxLayout(input_row)
+        input_layout.setContentsMargins(0, 0, 0, 0)
+        input_layout.addWidget(QtWidgets.QLabel("校准值（dB）："))
+        entry = QtWidgets.QLineEdit(self.offset_var.get())
+        entry.setFont(QtGui.QFont(self.owner.mainpage_button_font[0], self.owner.mainpage_button_font[1]))
+        entry.setFixedWidth(140)
+        entry.textChanged.connect(self.offset_var.set)
+        entry.textChanged.connect(lambda _e: self._refresh_calibrated_preview())
+        input_layout.addWidget(entry)
+        layout.addWidget(input_row)
 
-        tk.Label(main, textvariable=self.status_var, font=self.owner.mainpage_button_font, anchor="w").pack(fill="x")
+        status_label = QtWidgets.QLabel(self.status_var.get())
+        status_label.setFont(QtGui.QFont(self.owner.mainpage_button_font[0], self.owner.mainpage_button_font[1]))
+        self.status_var.changed.connect(status_label.setText)
+        layout.addWidget(status_label)
 
-        button_row = tk.Frame(main)
-        button_row.pack(fill="x", pady=(12, 0))
-        tk.Button(button_row, text="保存", width=10, command=self._save).pack(side="right", padx=(6, 0))
-        tk.Button(button_row, text="关闭", width=10, command=self.close).pack(side="right")
+        button_row = QtWidgets.QWidget()
+        button_layout = QtWidgets.QHBoxLayout(button_row)
+        button_layout.setContentsMargins(0, 0, 0, 0)
+        button_layout.addStretch(1)
+        save_btn = QtWidgets.QPushButton("保存")
+        save_btn.clicked.connect(self._save)
+        close_btn = QtWidgets.QPushButton("关闭")
+        close_btn.clicked.connect(self.close)
+        button_layout.addWidget(save_btn)
+        button_layout.addWidget(close_btn)
+        layout.addWidget(button_row)
 
     def _parse_offset(self) -> Optional[float]:
-        raw = self.offset_var.get().strip()
+        raw = str(self.offset_var.get()).strip()
         if raw == "":
             return None
         try:
@@ -270,8 +302,8 @@ class _CalibrationWindowController:
 
     def _safe_ui_call(self, callback):
         try:
-            if self.window and self.window.winfo_exists():
-                self.window.after(0, callback)
+            if self.window:
+                QtCore.QTimer.singleShot(0, callback)
         except Exception:
             pass
 

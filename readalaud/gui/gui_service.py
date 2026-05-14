@@ -2,9 +2,8 @@
 集中管理 GUI 通用操作：消息框、弹窗创建、窗口居中、主题切换。
 """
 
-import tkinter as tk
-from tkinter import messagebox
-import ttkbootstrap as ttkbs
+from PySide6 import QtCore, QtWidgets, QtGui
+from .qt_helpers import ensure_app, run_on_ui, set_dark_palette
 
 
 class GUIService:
@@ -23,85 +22,104 @@ class GUIService:
         return getattr(self.owner, "main_window", None)
 
     def info(self, message, title="提示", parent=None):
-        kwargs = {"message": message, "title": title}
-        resolved_parent = self._parent(parent)
-        if resolved_parent is not None:
-            kwargs["parent"] = resolved_parent
-        return messagebox.showinfo(**kwargs)
+        ensure_app()
+        parent_widget = self._parent(parent)
+        return QtWidgets.QMessageBox.information(parent_widget, title, message)
 
     def warning(self, message, title="提示", parent=None):
-        kwargs = {"message": message, "title": title}
-        resolved_parent = self._parent(parent)
-        if resolved_parent is not None:
-            kwargs["parent"] = resolved_parent
-        return messagebox.showwarning(**kwargs)
+        ensure_app()
+        parent_widget = self._parent(parent)
+        return QtWidgets.QMessageBox.warning(parent_widget, title, message)
 
     def error(self, message, title="错误", parent=None):
-        kwargs = {"message": message, "title": title}
-        resolved_parent = self._parent(parent)
-        if resolved_parent is not None:
-            kwargs["parent"] = resolved_parent
-        return messagebox.showerror(**kwargs)
+        ensure_app()
+        parent_widget = self._parent(parent)
+        return QtWidgets.QMessageBox.critical(parent_widget, title, message)
 
     def ask_yes_no(self, message, title="确认", parent=None):
-        kwargs = {"message": message, "title": title}
-        resolved_parent = self._parent(parent)
-        if resolved_parent is not None:
-            kwargs["parent"] = resolved_parent
-        return messagebox.askyesno(**kwargs)
+        ensure_app()
+        parent_widget = self._parent(parent)
+        res = QtWidgets.QMessageBox.question(parent_widget, title, message)
+        return res == QtWidgets.QMessageBox.StandardButton.Yes
 
     def ask_yes_no_cancel(self, message, title="确认", parent=None):
-        kwargs = {"message": message, "title": title}
-        resolved_parent = self._parent(parent)
-        if resolved_parent is not None:
-            kwargs["parent"] = resolved_parent
-        return messagebox.askyesnocancel(**kwargs)
+        ensure_app()
+        parent_widget = self._parent(parent)
+        res = QtWidgets.QMessageBox.question(
+            parent_widget,
+            title,
+            message,
+            QtWidgets.QMessageBox.StandardButton.Yes
+            | QtWidgets.QMessageBox.StandardButton.No
+            | QtWidgets.QMessageBox.StandardButton.Cancel,
+        )
+        if res == QtWidgets.QMessageBox.StandardButton.Yes:
+            return True
+        if res == QtWidgets.QMessageBox.StandardButton.No:
+            return False
+        return None
 
     def create_toplevel(self, title, size=None, parent=None, resizable=(False, False), modal=False, center=True):
+        ensure_app()
         master = self._parent(parent)
-        window = tk.Toplevel(master=master) if master is not None else tk.Toplevel()
-        window.title(title)
+        # Use QDialog for all toplevels so they appear as independent windows
+        window = QtWidgets.QDialog(master)
+        window.setWindowTitle(title)
         try:
-            window.iconbitmap("./assets/icon.ico")
+            window.setWindowIcon(QtGui.QIcon("./assets/icon.ico"))
         except Exception:
             pass
         if size:
             width, height = size
-            window.geometry(f"{width}x{height}")
+            window.resize(width, height)
         if resizable is not None:
-            window.resizable(bool(resizable[0]), bool(resizable[1]))
-        if master is not None:
-            window.transient(master)
-        if modal:
-            window.grab_set()
+            if not (bool(resizable[0]) and bool(resizable[1])):
+                window.setFixedSize(window.size())
         if center:
             self.center_window(window=window, parent=master)
+        # Ensure modality is set correctly (application modal) if requested
+        if modal:
+            window.setModal(True)
+            try:
+                window.setWindowModality(QtCore.Qt.WindowModality.ApplicationModal)
+            except Exception:
+                pass
+        # Show as a separate dialog window (non-blocking)
+        window.show()
         return window
 
     @staticmethod
     def center_window(window, parent=None):
-        window.update_idletasks()
-        width = window.winfo_width()
-        height = window.winfo_height()
-
-        if parent is not None and parent.winfo_exists():
-            px = parent.winfo_rootx() + (parent.winfo_width() - width) // 2
-            py = parent.winfo_rooty() + (parent.winfo_height() - height) // 2
+        if window is None:
+            return
+        if parent is not None:
+            parent_geo = parent.frameGeometry()
+            center_point = parent_geo.center()
         else:
-            sw = window.winfo_screenwidth()
-            sh = window.winfo_screenheight()
-            px = (sw - width) // 2
-            py = (sh - height) // 2
-
-        window.geometry(f"+{max(0, px)}+{max(0, py)}")
+            screen = QtWidgets.QApplication.primaryScreen()
+            center_point = screen.availableGeometry().center() if screen else QtCore.QPoint(0, 0)
+        geo = window.frameGeometry()
+        geo.moveCenter(center_point)
+        window.move(geo.topLeft())
 
     @staticmethod
     def set_theme(theme_name):
-        ttkbs.Style().theme_use(theme_name)
+        app = ensure_app()
+        if theme_name == "darkly":
+            set_dark_palette(app)
+            return
+        style = QtWidgets.QStyleFactory.create(theme_name)
+        if style is not None:
+            app.setStyle(style)
 
     @staticmethod
     def get_theme():
-        return ttkbs.Style().theme_use()
+        app = ensure_app()
+        return app.style().objectName() if app else ""
+
+    @staticmethod
+    def run_on_ui(callback):
+        run_on_ui(callback)
 
 
 _gui_service_singleton = GUIService()

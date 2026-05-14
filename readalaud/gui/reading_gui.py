@@ -2,7 +2,7 @@
 朗读页面 GUI：信息显示、开始/停止朗读、调试输出。
 """
 
-import tkinter as tk
+from PySide6 import QtCore, QtWidgets, QtGui
 from ..reading import reading_data_get_and_check, start_reading
 
 
@@ -11,78 +11,75 @@ def _generate_reading_gui(self):
         return
     else:
         self.if_reading_show = True
-    self.reading_frame = tk.Frame(master=self.main_window)
-    self.main_paned_window.add(self.reading_frame)
+    self.reading_frame = QtWidgets.QWidget()
+    self.reading_layout = QtWidgets.QVBoxLayout(self.reading_frame)
+    self.reading_layout.setContentsMargins(10, 10, 10, 10)
+    self.main_paned_window.addWidget(self.reading_frame, 7)
     if self.if_main_window_show == True:
-        self.content_frame.destroy()
+        self.content_frame.deleteLater()
         self.if_main_window_show = False
 
     # information show bar
-    information_show_lbframe = tk.LabelFrame(master=self.reading_frame)
-    information_show_lbframe.pack(fill="x", side="top", padx=5, pady=5)
+    information_show_lbframe = QtWidgets.QGroupBox()
+    info_layout = QtWidgets.QGridLayout(information_show_lbframe)
+    self.reading_layout.addWidget(information_show_lbframe)
 
     # 创建三个 Label，使用 grid 布局实现并排排列
     self.labels_list = [
-        tk.Label(master=information_show_lbframe, text="朗读目标: 未读取", font=("微软雅黑", 15)),
-        tk.Label(master=information_show_lbframe, text="声音阈值：未读取", font=("微软雅黑", 15)),
-        tk.Label(master=information_show_lbframe, text="语音提示：未读取", font=("微软雅黑", 15)),
+        QtWidgets.QLabel("朗读目标: 未读取"),
+        QtWidgets.QLabel("声音阈值：未读取"),
+        QtWidgets.QLabel("语音提示：未读取"),
     ]
+    for lbl in self.labels_list:
+        lbl.setFont(QtGui.QFont("微软雅黑", 15))
     # 详细信息标签
-    read_detail_show_lb_frame = tk.LabelFrame(master=self.reading_frame, border=0)
-    read_detail_show_lb_frame.pack(fill="x")
-    read_detail_show_lb_frame.columnconfigure(0, weight=1)
-    read_detail_show_lb_frame.columnconfigure(1, weight=1)
-    read_detail_show_lb_frame.columnconfigure(2, weight=1)
+    read_detail_show_lb_frame = QtWidgets.QGroupBox()
+    detail_layout = QtWidgets.QGridLayout(read_detail_show_lb_frame)
+    self.reading_layout.addWidget(read_detail_show_lb_frame)
 
-    self.labels_list[0].grid(row=0, column=0, sticky="w", padx=10)
-    self.labels_list[1].grid(row=0, column=1, sticky="n", padx=10)
-    self.labels_list[2].grid(row=0, column=2, sticky="e", padx=10)
+    info_layout.addWidget(self.labels_list[0], 0, 0, QtCore.Qt.AlignmentFlag.AlignLeft)
+    info_layout.addWidget(self.labels_list[1], 0, 1, QtCore.Qt.AlignmentFlag.AlignHCenter)
+    info_layout.addWidget(self.labels_list[2], 0, 2, QtCore.Qt.AlignmentFlag.AlignRight)
 
     self.information_label_list = [
-        tk.Label(master=read_detail_show_lb_frame, text="剩余时长: --:--:--", font=("微软雅黑", 15)),
-        tk.Label(master=read_detail_show_lb_frame, text="停顿总时长: --:--:--", font=("微软雅黑", 15)),
-        tk.Label(master=read_detail_show_lb_frame, text="有效朗读时间: --:--:--", font=("微软雅黑", 15)),
-        tk.Label(master=read_detail_show_lb_frame, text="总时长: --:--:--", font=("微软雅黑", 15)),
-        tk.Label(master=read_detail_show_lb_frame, text="最大音量: 未知", font=("微软雅黑", 15)),
-        tk.Label(master=read_detail_show_lb_frame, text="效率: 0.00", font=("微软雅黑", 15)),
+        QtWidgets.QLabel("剩余时长: --:--:--"),
+        QtWidgets.QLabel("停顿总时长: --:--:--"),
+        QtWidgets.QLabel("有效朗读时间: --:--:--"),
+        QtWidgets.QLabel("总时长: --:--:--"),
+        QtWidgets.QLabel("最大音量: 未知"),
+        QtWidgets.QLabel("效率: 0.00"),
     ]
+    for lbl in self.information_label_list:
+        lbl.setFont(QtGui.QFont("微软雅黑", 15))
 
-    read_detail_show_lb_frame.columnconfigure(0, weight=1)
-    read_detail_show_lb_frame.columnconfigure(1, weight=1)
-    read_detail_show_lb_frame.columnconfigure(2, weight=1)
-
-    self.information_label_list[0].grid(row=0, column=0, sticky="w", padx=10, pady=5)
-    self.information_label_list[1].grid(row=0, column=1, sticky="n", padx=10, pady=5)
-    self.information_label_list[2].grid(row=0, column=2, sticky="e", padx=10, pady=5)
-
-    self.information_label_list[3].grid(row=1, column=0, sticky="w", padx=10, pady=5)
-    self.information_label_list[4].grid(row=1, column=1, sticky="n", padx=10, pady=5)
-    self.information_label_list[5].grid(row=1, column=2, sticky="e", padx=10, pady=5)
+    detail_layout.addWidget(self.information_label_list[0], 0, 0, QtCore.Qt.AlignmentFlag.AlignLeft)
+    detail_layout.addWidget(self.information_label_list[1], 0, 1, QtCore.Qt.AlignmentFlag.AlignHCenter)
+    detail_layout.addWidget(self.information_label_list[2], 0, 2, QtCore.Qt.AlignmentFlag.AlignRight)
+    detail_layout.addWidget(self.information_label_list[3], 1, 0, QtCore.Qt.AlignmentFlag.AlignLeft)
+    detail_layout.addWidget(self.information_label_list[4], 1, 1, QtCore.Qt.AlignmentFlag.AlignHCenter)
+    detail_layout.addWidget(self.information_label_list[5], 1, 2, QtCore.Qt.AlignmentFlag.AlignRight)
 
     # buttons
-    start_button = tk.Button(
-        master=self.reading_frame, text="开始朗读", font=("微软雅黑", 15),
-        command=lambda: _start_reading(self),
-    )
-    start_button.pack(fill="x", pady=5)
-    back_button = tk.Button(
-        master=self.reading_frame, text="返回", font=("微软雅黑", 15),
-        command=lambda: _reading_back(self),
-    )
-    back_button.pack(fill="x", pady=5)
+    start_button = QtWidgets.QPushButton("开始朗读")
+    start_button.setFont(QtGui.QFont("微软雅黑", 15))
+    start_button.clicked.connect(lambda: _start_reading(self))
+    self.reading_layout.addWidget(start_button)
+    back_button = QtWidgets.QPushButton("返回")
+    back_button.setFont(QtGui.QFont("微软雅黑", 15))
+    back_button.clicked.connect(lambda: _reading_back(self))
+    self.reading_layout.addWidget(back_button)
 
     # state Label
-    self.reading_state_label = tk.Label(
-        master=self.reading_frame, text="正在准备中...", font=("微软雅黑", 40)
-    )
-    self.reading_state_label.pack(pady=10, fill="x")
+    self.reading_state_label = QtWidgets.QLabel("正在准备中...")
+    self.reading_state_label.setFont(QtGui.QFont("微软雅黑", 40))
+    self.reading_state_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+    self.reading_layout.addWidget(self.reading_state_label)
 
     # debug_show
-    self.show_debug = tk.Text(master=self.reading_frame, font=("Consolas", 13))
-    debug_scroll = tk.Scrollbar(master=self.show_debug, command=self.show_debug.yview)
-    self.show_debug.config(yscrollcommand=debug_scroll.set)
-    debug_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-    self.show_debug.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    self.show_debug = QtWidgets.QTextEdit()
+    self.show_debug.setFont(QtGui.QFont("Consolas", 13))
+    self.show_debug.setReadOnly(True)
+    self.reading_layout.addWidget(self.show_debug, 1)
     reading_data_get_and_check(self)
 
 

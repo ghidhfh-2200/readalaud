@@ -9,8 +9,8 @@ import subprocess
 import pathlib
 import threading
 import time
-import tkinter as tk
 import queue as queue_module
+from PySide6 import QtWidgets
 from multiprocessing import get_context
 from ..gui.gui_service import get_gui_service
 from ..logger.log_manager import log_system
@@ -33,16 +33,15 @@ def log(msg, self=None, queue=None):
         try:
             def _append():
                 try:
-                    self.show_debug.insert(tk.END, text)
-                    self.show_debug.see(tk.END)
+                    self.show_debug.append(text.rstrip("\n"))
                 except Exception:
                     pass
             try:
-                self.show_debug.after(0, _append)
+                from ..gui.qt_helpers import run_on_ui
+                run_on_ui(_append)
             except Exception:
                 try:
-                    self.show_debug.insert(tk.END, text)
-                    self.show_debug.see(tk.END)
+                    self.show_debug.append(text.rstrip("\n"))
                 except Exception:
                     pass
         except Exception as e:
@@ -55,7 +54,10 @@ def log(msg, self=None, queue=None):
 
 def reading_data_get_and_check(self):
     self.log_operation("调用朗读数据预检", "执行 reading_data_get_and_check")
-    self.show_debug.configure(state="normal")
+    try:
+        self.show_debug.setReadOnly(False)
+    except Exception:
+        pass
     get_date = datetime.datetime.now().strftime("%Y-%m-%d")
     try:
         with open(f"./data/{self.current_acount}/settings.json", "r", encoding="utf-8") as f:
@@ -72,8 +74,8 @@ def reading_data_get_and_check(self):
                     json.dump(self.load_settings, f)
                 log("无法读取到TTS设置文件，已自动重置,请重新读取", self)
                 try:
-                    self.reading_state_label.configure(text="出错！", fg="red")
-                    self.reading_state_label.update_idletasks()
+                    self.reading_state_label.setText("出错！")
+                    self.reading_state_label.setStyleSheet("color: red;")
                 except Exception:
                     pass
         else:
@@ -89,8 +91,8 @@ def reading_data_get_and_check(self):
             json.dump(write_data, f)
         log("无法读取配置文件，已自动重置", self)
         try:
-            self.reading_state_label.configure(text="出错！", fg="red")
-            self.reading_state_label.update_idletasks()
+            self.reading_state_label.setText("出错！")
+            self.reading_state_label.setStyleSheet("color: red;")
         except Exception:
             pass
         self.load_settings = write_data
@@ -109,27 +111,32 @@ def reading_data_get_and_check(self):
                 else:
                     self.read_today_data["left"] = 0
                 try:
-                    self.information_label_list[0].configure(text=f"剩余时长: {datetime.timedelta(seconds=float(self.read_today_data['left']))}")
-                    self.information_label_list[1].configure(text=f"停顿总时长: {datetime.timedelta(seconds=float(self.read_today_data['stop_total']))}")
-                    self.information_label_list[2].configure(text=f"有效朗读时间: {datetime.timedelta(seconds=float(self.read_today_data['real_read_time']))}")
-                    self.information_label_list[3].configure(text=f"总时长: {datetime.timedelta(seconds=float(self.read_today_data['total']))}")
-                    self.information_label_list[4].configure(text=f"最大音量: {float(self.read_today_data['max_sound'])}")
-                    self.information_label_list[5].configure(text=f"效率: {self.read_today_data['efficiency']}")
-                    self.labels_list[0].configure(text=f"朗读目标: {datetime.timedelta(seconds=float(self.load_settings['goal']))}")
-                    self.labels_list[1].configure(text=f"声音阈值: {self.load_settings['db-level']}")
-                    self.labels_list[2].configure(text=f"语音提示: {self.load_settings['if_tts']}")
-                    for lbl in self.information_label_list + self.labels_list:
-                        try:
-                            lbl.update_idletasks()
-                        except Exception:
-                            pass
+                    self.information_label_list[0].setText(
+                        f"剩余时长: {datetime.timedelta(seconds=float(self.read_today_data['left']))}"
+                    )
+                    self.information_label_list[1].setText(
+                        f"停顿总时长: {datetime.timedelta(seconds=float(self.read_today_data['stop_total']))}"
+                    )
+                    self.information_label_list[2].setText(
+                        f"有效朗读时间: {datetime.timedelta(seconds=float(self.read_today_data['real_read_time']))}"
+                    )
+                    self.information_label_list[3].setText(
+                        f"总时长: {datetime.timedelta(seconds=float(self.read_today_data['total']))}"
+                    )
+                    self.information_label_list[4].setText(f"最大音量: {float(self.read_today_data['max_sound'])}")
+                    self.information_label_list[5].setText(f"效率: {self.read_today_data['efficiency']}")
+                    self.labels_list[0].setText(
+                        f"朗读目标: {datetime.timedelta(seconds=float(self.load_settings['goal']))}"
+                    )
+                    self.labels_list[1].setText(f"声音阈值: {self.load_settings['db-level']}")
+                    self.labels_list[2].setText(f"语音提示: {self.load_settings['if_tts']}")
                 except Exception as e:
                     self.log_error("朗读界面更新失败", str(e))
                     print("UI update error:", e, flush=True)
                 log("一切准备就绪！", self)
                 try:
-                    self.reading_state_label.configure(text="准备就绪!", fg="green")
-                    self.reading_state_label.update_idletasks()
+                    self.reading_state_label.setText("准备就绪!")
+                    self.reading_state_label.setStyleSheet("color: green;")
                 except Exception:
                     pass
                 return
@@ -172,16 +179,13 @@ def start_webpage():
         import webbrowser
         opened = webbrowser.open(url)
         if not opened:
-            root = tk.Tk()
-            root.withdraw()
-            root.clipboard_clear()
-            root.clipboard_append(url)
-            root.update()
+            app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+            clipboard = app.clipboard()
+            clipboard.setText(url)
             get_gui_service().error(
                 f"无法自动打开浏览器！\n已成功自动复制链接到剪贴板，请手动去浏览器中粘贴访问：\n{url}",
                 title="不支持",
             )
-            root.destroy()
             log_system("打开朗读网页失败", "自动打开浏览器失败，已复制链接")
     except Exception as e:
         log(f"打开网页失败: {e}")

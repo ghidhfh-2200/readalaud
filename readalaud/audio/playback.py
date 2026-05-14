@@ -4,6 +4,7 @@ playback.py —— 日录音文件的播放、暂停、停止与进度条控制�
 import os
 import time
 import wave
+from PySide6 import QtCore
 
 
 def bind_audio_analasy_api(instance):
@@ -41,7 +42,31 @@ def _format_time(seconds):
 
 def _set_audio_status(self, text="", color="#dc3545"):
     if hasattr(self, "day_audio_status"):
-        self.day_audio_status.config(text=text, fg=color)
+        self.day_audio_status.setText(text)
+        self.day_audio_status.setStyleSheet(f"color: {color};")
+
+
+def _cancel_progress_timer(self):
+    st = getattr(self, "_day_audio_state", {})
+    timer = st.get("after_id")
+    if timer is None:
+        return
+    try:
+        timer.stop()
+    except Exception:
+        pass
+    st["after_id"] = None
+
+
+def _schedule_progress_tick(self, interval_ms=200):
+    st = getattr(self, "_day_audio_state", {})
+    _cancel_progress_timer(self)
+    parent = getattr(self, "day_detail_container", None)
+    timer = QtCore.QTimer(parent)
+    timer.setSingleShot(True)
+    timer.timeout.connect(lambda: _update_progress_tick(self))
+    timer.start(interval_ms)
+    st["after_id"] = timer
 
 
 def get_audio_duration(path):
@@ -82,17 +107,12 @@ def stop_day_audio(self, reset=False):
     st["paused"] = False
     st["play_obj"] = None
     st["play_start"] = None
-    if st.get("after_id"):
-        try:
-            self.day_detail_container.after_cancel(st["after_id"])
-        except Exception:
-            pass
-        st["after_id"] = None
+    _cancel_progress_timer(self)
     if reset:
         st["offset"] = 0.0
         st["programmatic"] = True
         if hasattr(self, "day_audio_scale"):
-            self.day_audio_scale.set(0)
+            self.day_audio_scale.setValue(0)
         st["programmatic"] = False
 
 
@@ -108,10 +128,10 @@ def _update_progress_tick(self):
         return
     st["programmatic"] = True
     if hasattr(self, "day_audio_scale"):
-        self.day_audio_scale.set(current)
+        self.day_audio_scale.setValue(int(current))
     st["programmatic"] = False
     _set_audio_status(self, f"{_format_time(current)} / {_format_time(st.get('duration', 0))}", "#6c757d")
-    st["after_id"] = self.day_detail_container.after(200, lambda: _update_progress_tick(self))
+    _schedule_progress_tick(self, 200)
 
 
 def _play_from_offset(self):
@@ -147,14 +167,14 @@ def play_day_audio(self):
         _set_audio_status(self, "无音频", "#dc3545")
         st["programmatic"] = True
         if hasattr(self, "day_audio_scale"):
-            self.day_audio_scale.set(0)
+            self.day_audio_scale.setValue(0)
         st["programmatic"] = False
         return
     if not st.get("raw"):
         duration, fr, ch, sw, raw = _load_audio_meta(st["path"])
         st.update({"duration": duration, "frame_rate": fr, "channels": ch, "sampwidth": sw, "raw": raw})
         if hasattr(self, "day_audio_scale"):
-            self.day_audio_scale.config(from_=0, to=max(1, duration))
+            self.day_audio_scale.setRange(0, max(1, int(duration)))
     if st.get("playing"):
         return
     ok = _play_from_offset(self)
@@ -172,7 +192,7 @@ def pause_day_audio(self):
     st["paused"] = True
     st["programmatic"] = True
     if hasattr(self, "day_audio_scale"):
-        self.day_audio_scale.set(st["offset"])
+        self.day_audio_scale.setValue(int(st["offset"]))
     st["programmatic"] = False
     _set_audio_status(self, f"已暂停 {_format_time(st['offset'])}", "#6c757d")
 
@@ -182,7 +202,7 @@ def seek_day_audio(self):
     if st is None or st.get("programmatic"):
         return
     try:
-        new_val = float(self.day_audio_scale.get())
+        new_val = float(self.day_audio_scale.value())
     except Exception:
         return
     st["offset"] = max(0.0, min(new_val, st.get("duration", 0.0)))
