@@ -100,7 +100,12 @@ ReadAlaud/
  requirements.txt         # 依赖列表
  LICENSE                  # MIT 许可证
  README.md                # 项目文档
- web/                     # 网页前端相关文件 (朗读页面 / 校准页面)
+ project_board.html       # 项目看板页面
+ assets/                  # 静态资源
+    icon.ico              # 应用程序图标 (Windows)
+    icon.svg              # 应用程序图标 (SVG)
+ web/                     # 网页前端相关文件
+    audio_visualizer.html # 音频可视化页面
  readalaud/               # 核心 Python 包
     __init__.py
     core.py               # 核心 ReadAlaud 类与模块绑定入口
@@ -145,6 +150,7 @@ ReadAlaud/
         daily_detail.py   # 单日音量曲线与对比分析
         chart_builder.py  # 热力图 / 趋势图 / 音量图 构建
         analysis_engine.py# 深度音频分析 (VAD/RMS/LTAS/ZCR/Pitch/SNR/MFCC/...)
+        report.py         # 音频分析报告生成
 
     # TTS 模块
     tts/
@@ -178,6 +184,7 @@ ReadAlaud/
         data_gui.py       # 数据面板与音频分析界面
         settings_gui.py   # 设置界面 / 主题切换
         tts_gui.py        # TTS 调节与测试界面 / 自定义音频管理
+        qt_helpers.py     # Qt 辅助工具函数
 
     # 日志系统
     logger/
