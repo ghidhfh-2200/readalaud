@@ -196,9 +196,17 @@ def _save_account_name(self):
             json.dump(read_accounts, f)
         os.rename(f"./data/{self.current_acount}", f"./data/{new_name}")
         self.current_acount = new_name
-        self.current_account_label.config(
-            text=f"当前登录：{base64.urlsafe_b64decode(self.current_acount).decode('utf-8')}"
-        )
+        try:
+            self.current_account_label.setText(
+                f"当前登录：{base64.urlsafe_b64decode(self.current_acount).decode('utf-8')}"
+            )
+        except Exception:
+            try:
+                self.current_account_label.config(
+                    text=f"当前登录：{base64.urlsafe_b64decode(self.current_acount).decode('utf-8')}"
+                )
+            except Exception:
+                pass
         self.gui.info(message="账户名称修改成功！")
         self.log_operation("修改账户名", "账户名称已被更改")
     except FileNotFoundError:
@@ -287,13 +295,17 @@ def _write_single_setting(self, key, value, success_msg):
 def _change_theme(self):
     self.log_operation("调用主题切换", "执行 change_theme")
     try:
-        selection = self.customize_listbox.curselection()
-        if not selection:
+        current_row = getattr(self.customize_listbox, "currentRow", lambda: -1)()
+        if current_row < 0:
             self.log_warning("主题切换未执行", "未选择主题")
             self.gui.error(message="请先选择一个样式")
             return
 
-        get_selected = self.customize_listbox.get(selection[0])
+        item = self.customize_listbox.item(current_row)
+        if not item:
+            return
+            
+        get_selected = item.text()
         self.gui.set_theme(get_selected)
         settings_path = f"./data/{self.current_acount}/settings.json"
         with open(settings_path, "r") as f:
@@ -301,6 +313,6 @@ def _change_theme(self):
         read_settings["theme"] = get_selected
         with open(settings_path, "w") as f:
             json.dump(read_settings, f)
-    except Exception:
-        self.log_error("主题切换失败", "Tk 组件状态异常")
-        self.gui.error(message="请先选择一个样式")
+    except Exception as e:
+        self.log_error("主题切换失败", f"Qt 组件状态异常: {e}")
+        self.gui.error(message="切换样式时出错")

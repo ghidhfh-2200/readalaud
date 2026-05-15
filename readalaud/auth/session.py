@@ -292,6 +292,49 @@ def _delete_the_account(self):
         if not self.gui.ask_yes_no(message="确定要注销账号吗？\n你的数据会全部丢失!"):
             self.log_warning("取消删除账户", "用户取消删除账户")
             return
+
+        # 弹出密码确认对话框
+        try:
+            from PySide6 import QtWidgets
+            parent = getattr(self, "main_window", None)
+            pwd, ok = QtWidgets.QInputDialog.getText(parent, "密码确认", "请输入当前密码以确认注销：", QtWidgets.QLineEdit.EchoMode.Password)
+        except Exception:
+            pwd, ok = None, False
+
+        if not ok or not pwd:
+            self.gui.info(message="已取消：未输入密码或已取消操作")
+            return
+
+        # 验证密码是否正确
+        try:
+            accounts = load_accounts()
+            stored_password = accounts.get("passwords", {}).get(self.current_acount)
+            if not stored_password:
+                self.gui.error(message="无法验证密码（账户数据缺失）")
+                return
+            is_valid = False
+            if "$" in stored_password:
+                salt, expected_hash = stored_password.split("$", 1)
+                input_hash = hashlib.sha256((salt + pwd).encode("utf-8")).hexdigest()
+                is_valid = (input_hash == expected_hash)
+            else:
+                # legacy
+                input_hash = hashlib.sha256(pwd.encode("utf-8")).hexdigest()
+                if stored_password == input_hash:
+                    is_valid = True
+                else:
+                    try:
+                        if base64.urlsafe_b64decode(stored_password).decode("utf-8") == pwd:
+                            is_valid = True
+                    except Exception:
+                        pass
+            if not is_valid:
+                self.gui.error(message="密码错误，操作已取消")
+                return
+        except Exception as e:
+            self.log_error("删除账户前密码验证失败", str(e))
+            self.gui.error(message="验证密码时发生错误，已取消操作")
+            return
         try:
             self._stop_sidebar_today_status_monitor()
         except Exception:
@@ -306,7 +349,13 @@ def _delete_the_account(self):
         except FileNotFoundError:
             pass
         self.current_acount = ""
-        self.current_account_label.config(text="当前登录：(未登录)")
+        try:
+            self.current_account_label.setText("当前登录：(未登录)")
+        except Exception:
+            try:
+                self.current_account_label.config(text="当前登录：(未登录)")
+            except Exception:
+                pass
         self.if_logged_in = False
         self.welcome_page(destroy_window=[self.settings_frame, "settings"])
         self.gui.info(message="账户已成功注销!")
@@ -328,6 +377,48 @@ def _reset_account_data(self):
         if not self.gui.ask_yes_no(message="确定要重置所有数据吗？\n你的密码会保持不变\n其他数据会全部丢失!"):
             self.log_warning("取消重置账户数据", "用户取消重置")
             return
+
+        # 弹出密码确认
+        try:
+            from PySide6 import QtWidgets
+            parent = getattr(self, "main_window", None)
+            pwd, ok = QtWidgets.QInputDialog.getText(parent, "密码确认", "请输入当前密码以确认重置：", QtWidgets.QLineEdit.EchoMode.Password)
+        except Exception:
+            pwd, ok = None, False
+
+        if not ok or not pwd:
+            self.gui.info(message="已取消：未输入密码或已取消操作")
+            return
+
+        # 验证密码
+        try:
+            accounts = load_accounts()
+            stored_password = accounts.get("passwords", {}).get(self.current_acount)
+            if not stored_password:
+                self.gui.error(message="无法验证密码（账户数据缺失）")
+                return
+            is_valid = False
+            if "$" in stored_password:
+                salt, expected_hash = stored_password.split("$", 1)
+                input_hash = hashlib.sha256((salt + pwd).encode("utf-8")).hexdigest()
+                is_valid = (input_hash == expected_hash)
+            else:
+                input_hash = hashlib.sha256(pwd.encode("utf-8")).hexdigest()
+                if stored_password == input_hash:
+                    is_valid = True
+                else:
+                    try:
+                        if base64.urlsafe_b64decode(stored_password).decode("utf-8") == pwd:
+                            is_valid = True
+                    except Exception:
+                        pass
+            if not is_valid:
+                self.gui.error(message="密码错误，操作已取消")
+                return
+        except Exception as e:
+            self.log_error("重置数据前密码验证失败", str(e))
+            self.gui.error(message="验证密码时发生错误，已取消操作")
+            return
         try:
             self._stop_sidebar_today_status_monitor()
         except Exception:
@@ -338,9 +429,18 @@ def _reset_account_data(self):
             shutil.rmtree(f"./details/{self.current_acount}")
         ensure_user_dir(self.current_acount)
         self.current_acount = ""
-        self.current_account_label.config(text="当前登录：(未登录)")
+        try:
+            self.current_account_label.setText("当前登录：(未登录)")
+        except Exception:
+            try:
+                self.current_account_label.config(text="当前登录：(未登录)")
+            except Exception:
+                pass
         self.if_logged_in = False
-        self.welcome_page(destroy_window=[self.settings_frame, "settings"])
+        try:
+            self.welcome_page(destroy_window=[self.settings_frame, "settings"])
+        except Exception:
+            pass
         self.gui.info(message="数据已重置，密码保持不变\n请重新登录！")
         self.log_success("重置数据", "重置了当前账户的所有数据保留密码")
     except OSError:
@@ -357,8 +457,19 @@ def _logout(self):
     self.current_acount = ""
     self.if_logged_in = False
     try:
-        self.current_account_label.config(text="当前登录：(未登录)")
-        self.welcome_page(destroy_window=[self.settings_frame, "settings"])
+        try:
+            # Qt QLabel
+            self.current_account_label.setText("当前登录：(未登录)")
+        except Exception:
+            try:
+                # tkinter fallback
+                self.current_account_label.config(text="当前登录：(未登录)")
+            except Exception:
+                pass
+        try:
+            self.welcome_page(destroy_window=[self.settings_frame, "settings"])
+        except Exception:
+            pass
     except Exception:
         pass
     self.gui.info(message="已成功退出登录！")

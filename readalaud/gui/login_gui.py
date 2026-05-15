@@ -118,41 +118,65 @@ def _generate_login_gui(self):
     self.login_status_var = ValueHolder("请输入账号和密码")
     self.login_status_label = QtWidgets.QLabel(self.login_status_var.get())
     self.login_status_label.setFont(QtGui.QFont("微软雅黑", 10))
+    self.login_status_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
     self.login_status_label.setStyleSheet("color: #6c757d;")
     self.login_status_var.changed.connect(self.login_status_label.setText)
-    self.login_layout.addWidget(self.login_status_label)
+    self.login_layout.addWidget(self.login_status_label, alignment=QtCore.Qt.AlignmentFlag.AlignHCenter)
+
+    def _update_login_input_width():
+        """保持登录输入区域居中并占据登录页宽度的一半。"""
+        try:
+            frame_width = max(0, self.login_frame.width())
+            target_width = max(260, int(frame_width * 0.5))
+            for widget in (
+                getattr(self, "login_enter_acount_name", None),
+                getattr(self, "login_enter_password_entry", None),
+            ):
+                if widget is not None:
+                    widget.setMinimumWidth(target_width)
+                    widget.setMaximumWidth(target_width)
+        except Exception:
+            pass
+
+    self._update_login_input_width = _update_login_input_width
 
     # enter username row
     enter_user_name = QtWidgets.QWidget()
     enter_user_layout = QtWidgets.QHBoxLayout(enter_user_name)
     enter_user_layout.setContentsMargins(0, 0, 0, 0)
+    enter_user_layout.addStretch(1)
     self.login_enter_acount_label = QtWidgets.QLabel("用户名：")
     self.login_enter_acount_label.setFont(QtGui.QFont("微软雅黑", 14))
     self.login_enter_acount_name = QtWidgets.QLineEdit()
     self.login_enter_acount_name.setFont(QtGui.QFont("微软雅黑", 14))
+    self.login_enter_acount_name.setSizePolicy(QtWidgets.QSizePolicy.Policy.Fixed, QtWidgets.QSizePolicy.Policy.Fixed)
     self.login_enter_acount_name.setMinimumWidth(260)
     if isinstance(self.login_acount_enter, ValueHolder):
         self.login_enter_acount_name.setText(self.login_acount_enter.get() or "")
         self.login_enter_acount_name.textChanged.connect(self.login_acount_enter.set)
     enter_user_layout.addWidget(self.login_enter_acount_label)
     enter_user_layout.addWidget(self.login_enter_acount_name)
+    enter_user_layout.addStretch(1)
     self.login_layout.addWidget(enter_user_name)
 
     # enter password row
     enter_password = QtWidgets.QWidget()
     enter_pwd_layout = QtWidgets.QHBoxLayout(enter_password)
     enter_pwd_layout.setContentsMargins(0, 0, 0, 0)
+    enter_pwd_layout.addStretch(1)
     self.login_enter_password_label = QtWidgets.QLabel("密码：")
     self.login_enter_password_label.setFont(QtGui.QFont("微软雅黑", 14))
     self.login_enter_password_entry = QtWidgets.QLineEdit()
     self.login_enter_password_entry.setFont(QtGui.QFont("微软雅黑", 14))
     self.login_enter_password_entry.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
+    self.login_enter_password_entry.setSizePolicy(QtWidgets.QSizePolicy.Policy.Fixed, QtWidgets.QSizePolicy.Policy.Fixed)
     self.login_enter_password_entry.setMinimumWidth(260)
     if isinstance(self.login_password_enter, ValueHolder):
         self.login_enter_password_entry.setText(self.login_password_enter.get() or "")
         self.login_enter_password_entry.textChanged.connect(self.login_password_enter.set)
     enter_pwd_layout.addWidget(self.login_enter_password_label)
     enter_pwd_layout.addWidget(self.login_enter_password_entry)
+    enter_pwd_layout.addStretch(1)
     self.login_layout.addWidget(enter_password)
 
     # buttons
@@ -171,3 +195,18 @@ def _generate_login_gui(self):
     self.login_layout.addStretch(1)
 
     self.login_frame.destroyed.connect(lambda _e=None: _stop_login_lock_countdown(self))
+
+    login_frame_ref = self.login_frame
+
+    class _LoginFrameResizeFilter(QtCore.QObject):
+        def eventFilter(self, obj, event):
+            if obj is login_frame_ref and event.type() == QtCore.QEvent.Type.Resize:
+                _update_login_input_width()
+            return False
+
+    try:
+        self._login_frame_resize_filter = _LoginFrameResizeFilter(self.login_frame)
+        self.login_frame.installEventFilter(self._login_frame_resize_filter)
+    except Exception:
+        pass
+    _update_login_input_width()
