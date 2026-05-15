@@ -20,6 +20,7 @@ from PySide6 import QtCore, QtWidgets, QtGui
 import numpy as np
 
 from ..gui.gui_service import get_gui_service
+from ..gui.qt_helpers import run_on_ui
 
 _DEFAULT_CALIBRATION = 94.0
 _CHUNK = 1024
@@ -70,6 +71,7 @@ class _CalibrationWindowController:
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._latest_raw_db: Optional[float] = None
+        self._destroying = False
 
         from ..gui.qt_helpers import ValueHolder
         self.raw_var = ValueHolder("-- dB")
@@ -92,7 +94,29 @@ class _CalibrationWindowController:
             resizable=(False, False),
             modal=False,
             center=True,
+            show=False,
         )
+        try:
+            # Make dialog a regular top-level window so it won't be auto-closed
+            # Use Qt.Window as a flag; fallback if attribute names differ across PySide versions
+            # PySide6 enum names vary; try to access common alternatives
+            flag_window = getattr(QtCore.Qt, "Window", None) or getattr(QtCore.Qt, "WindowType", None)
+            if flag_window is None:
+                # last resort: use integer value for Qt::Window (0x00000000)
+                flag_window = 0
+            self.window.setWindowFlags(self.window.windowFlags() | flag_window)
+            # Ensure the widget is not auto-deleted on close (we manage lifecycle)
+            try:
+                self.window.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, False)
+            except Exception:
+                pass
+            # Now that flags are set, show the window
+            try:
+                self.window.show()
+            except Exception:
+                pass
+        except Exception:
+            pass
         self.owner.if_calibration_show = True
         try:
             self.window.destroyed.connect(self._on_destroy)
@@ -101,6 +125,7 @@ class _CalibrationWindowController:
 
         self._build_ui()
         self._ensure_focus()
+        self.status_var.set("正在启动麦克风校准...")
         self._start_meter_thread()
 
     def focus(self):
@@ -109,21 +134,37 @@ class _CalibrationWindowController:
             self.window.raise_()
             self.window.activateWindow()
 
+    def _window_exists(self) -> bool:
+        """判断窗口对象是否仍然有效。"""
+        window = self.window
+        if window is None:
+            return False
+        try:
+            return bool(window.isVisible() or window.isEnabled() or window.isActiveWindow() or window.winId())
+        except RuntimeError:
+            return False
+        except Exception:
+            return False
+
     def _ensure_focus(self):
         """窗口创建后主动抢占焦点，确保可立即开始校准。"""
-        if not self.window:
+        window = self.window
+        if not window:
             return
 
         def _focus_once():
-            if not self.window or not self.window.winfo_exists():
+            current_window = self.window
+            if current_window is None:
+                return
+            if not self._window_exists():
                 return
             try:
-                self.window.show()
-                self.window.raise_()
-                self.window.activateWindow()
-                self.window.setWindowFlag(QtCore.Qt.WindowType.WindowStaysOnTopHint, True)
-                self.window.show()
-                QtCore.QTimer.singleShot(120, lambda: self.window and self.window.setWindowFlag(QtCore.Qt.WindowType.WindowStaysOnTopHint, False))
+                current_window.show()
+                current_window.raise_()
+                current_window.activateWindow()
+                current_window.setWindowFlag(QtCore.Qt.WindowType.WindowStaysOnTopHint, True)
+                current_window.show()
+                QtCore.QTimer.singleShot(120, lambda win=current_window: win.setWindowFlag(QtCore.Qt.WindowType.WindowStaysOnTopHint, False) if win is not None else None)
             except Exception:
                 pass
 
@@ -132,16 +173,42 @@ class _CalibrationWindowController:
         QtCore.QTimer.singleShot(220, _focus_once)
 
     def close(self):
-        self._stop_event.set()
-        if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=1.0)
-        if self.window:
-            self.window.close()
+        if self._destroying:
+            return
+        self._destroying = True
+        try:
+            try:
+                if self.owner and hasattr(self.owner, "log_operation"):
+                    self.owner.log_operation("关闭校准窗口", "开始关闭并停止采样线程")
+            except Exception:
+                pass
+            self._stop_event.set()
+            if self._thread and self._thread.is_alive():
+                self._thread.join(timeout=1.0)
+            try:
+                if self.window:
+                    self.window.close()
+            except Exception:
+                pass
+            self.window = None
+        finally:
+            self._destroying = False
 
     def _on_destroy(self, _event=None):
-        self._stop_event.set()
-        self.owner.if_calibration_show = False
-        setattr(self.owner, "_calibration_controller", None)
+        # Ensure a clean shutdown when the widget is destroyed
+        try:
+            if not self._destroying:
+                self.close()
+        except Exception:
+            pass
+        try:
+            self.owner.if_calibration_show = False
+        except Exception:
+            pass
+        try:
+            setattr(self.owner, "_calibration_controller", None)
+        except Exception:
+            pass
 
     def _build_ui(self):
         assert self.window is not None
@@ -248,7 +315,18 @@ class _CalibrationWindowController:
             self.gui.error(message=f"保存失败：{e}", title="错误")
 
     def _start_meter_thread(self):
+        if self._thread and self._thread.is_alive():
+            return
+        self._stop_event.clear()
         self._thread = threading.Thread(target=self._meter_loop, daemon=True)
+        try:
+            if self.owner and hasattr(self.owner, "log_operation"):
+                try:
+                    self.owner.log_operation("校准线程", "启动麦克风采样线程")
+                except Exception:
+                    pass
+        except Exception:
+            pass
         self._thread.start()
 
     def _meter_loop(self):
@@ -271,6 +349,10 @@ class _CalibrationWindowController:
                 try:
                     frame = stream.read(_CHUNK, exception_on_overflow=False)
                 except Exception:
+                    # transient read error; give small pause to avoid busy loop
+                    import time
+
+                    time.sleep(0.05)
                     continue
 
                 samples = np.frombuffer(frame, dtype=np.int16)
@@ -280,8 +362,22 @@ class _CalibrationWindowController:
                 rms = float(np.sqrt(np.mean(normalized * normalized)))
                 raw_db = 20.0 * math.log10(max(rms, _EPS))
                 self._latest_raw_db = raw_db
-                self._safe_ui_call(lambda v=raw_db: self._update_meter_values(v))
+                try:
+                    self._safe_ui_call(lambda v=raw_db: self._update_meter_values(v))
+                except Exception:
+                    # UI dispatch failed — log and continue
+                    try:
+                        if self.owner and hasattr(self.owner, "log_error"):
+                            self.owner.log_error("校准UI更新失败", "_safe_ui_call 或 _update_meter_values 异常")
+                    except Exception:
+                        pass
+                    continue
         except Exception as e:
+            try:
+                if self.owner and hasattr(self.owner, "log_error"):
+                    self.owner.log_error("麦克风采样线程异常", str(e))
+            except Exception:
+                pass
             self._safe_ui_call(lambda: self.status_var.set(f"麦克风初始化失败：{e}"))
         finally:
             try:
@@ -303,7 +399,7 @@ class _CalibrationWindowController:
     def _safe_ui_call(self, callback):
         try:
             if self.window:
-                QtCore.QTimer.singleShot(0, callback)
+                run_on_ui(callback)
         except Exception:
             pass
 
@@ -313,8 +409,11 @@ def start_calibration(self):
     existing = getattr(self, "_calibration_controller", None)
     if existing is not None and getattr(existing, "window", None) is not None:
         try:
-            if existing.window.winfo_exists():
+            if existing._window_exists():
                 existing.focus()
+    
+                existing.status_var.set("正在启动麦克风校准...")
+                existing._start_meter_thread()
                 return
         except Exception:
             pass

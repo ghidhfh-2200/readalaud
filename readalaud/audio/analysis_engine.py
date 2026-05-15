@@ -10,8 +10,33 @@ import matplotlib
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib import cm as _mpl_cm
+from matplotlib import font_manager as _font_manager
 
 matplotlib.use("Agg")
+
+
+def _pick_cjk_font_family() -> str:
+    preferred = (
+        "Microsoft YaHei",
+        "SimHei",
+        "Noto Sans CJK SC",
+        "Noto Sans CJK JP",
+        "WenQuanYi Zen Hei",
+        "Arial Unicode MS",
+    )
+    available = {f.name for f in _font_manager.fontManager.ttflist}
+    for family in preferred:
+        if family in available:
+            return family
+    return "DejaVu Sans"
+
+
+_CJK_FONT_FAMILY = _pick_cjk_font_family()
+matplotlib.rcParams["font.family"] = [
+    _CJK_FONT_FAMILY,
+    "DejaVu Sans",
+]
+matplotlib.rcParams["axes.unicode_minus"] = False
 
 
 # ══════════════════════════════════════════════════════════
@@ -189,10 +214,10 @@ def _analyze_vad(samples, sr, output_path):
     e_norm = energy / energy.max() if energy.max() > 0 else energy
     ax.fill_between(times, is_speech.astype(float), alpha=0.4, color="#28a745", label="语音段")
     ax.plot(times, e_norm, color="#007acc", linewidth=0.5, alpha=0.6, label="能量")
-    ax.set_xlabel("时间 (s)", fontproperties="Microsoft YaHei")
-    ax.set_ylabel("活动", fontproperties="Microsoft YaHei")
-    ax.set_title("语音活动检测 (VAD)", fontproperties="Microsoft YaHei", fontsize=10)
-    ax.legend(prop={"family": "Microsoft YaHei", "size": 8})
+    ax.set_xlabel("时间 (s)", fontproperties=_CJK_FONT_FAMILY)
+    ax.set_ylabel("活动", fontproperties=_CJK_FONT_FAMILY)
+    ax.set_title("语音活动检测 (VAD)", fontproperties=_CJK_FONT_FAMILY, fontsize=10)
+    ax.legend(prop={"family": _CJK_FONT_FAMILY, "size": 8})
     ax.set_ylim(-0.05, 1.15)
     fig.tight_layout()
     _save_fig(fig, output_path)
@@ -211,9 +236,9 @@ def _analyze_rms(samples, sr, output_path):
     ax = fig.add_subplot(111)
     ax.plot(times, rms, color="#ff6f00", linewidth=0.8)
     ax.fill_between(times, rms, alpha=0.2, color="#ff6f00")
-    ax.set_xlabel("时间 (s)", fontproperties="Microsoft YaHei")
-    ax.set_ylabel("RMS", fontproperties="Microsoft YaHei")
-    ax.set_title("短时能量 (RMS)", fontproperties="Microsoft YaHei", fontsize=10)
+    ax.set_xlabel("时间 (s)", fontproperties=_CJK_FONT_FAMILY)
+    ax.set_ylabel("RMS", fontproperties=_CJK_FONT_FAMILY)
+    ax.set_title("短时能量 (RMS)", fontproperties=_CJK_FONT_FAMILY, fontsize=10)
     fig.tight_layout()
     _save_fig(fig, output_path)
     return {"均值RMS": f"{np.mean(rms):.4f}", "最大RMS": f"{np.max(rms):.4f}"}
@@ -248,11 +273,11 @@ def _analyze_ltas(samples, sr, output_path):
         label = f"{i*10}-{min((i+1)*10, len(samples)/sr):.0f}s"
         ax.plot(freqs, spectrum_db, color=colors[i], linewidth=0.8, alpha=0.7, label=label)
 
-    ax.set_xlabel("频率 (Hz)", fontproperties="Microsoft YaHei")
-    ax.set_ylabel("幅度 (dB)", fontproperties="Microsoft YaHei")
-    ax.set_title("长时平均能量谱 (LTAS, 10s 切片)", fontproperties="Microsoft YaHei", fontsize=10)
+    ax.set_xlabel("频率 (Hz)", fontproperties=_CJK_FONT_FAMILY)
+    ax.set_ylabel("幅度 (dB)", fontproperties=_CJK_FONT_FAMILY)
+    ax.set_title("长时平均能量谱 (LTAS, 10s 切片)", fontproperties=_CJK_FONT_FAMILY, fontsize=10)
     if n_slices <= 12:
-        ax.legend(prop={"family": "Microsoft YaHei", "size": 7}, loc="upper right", ncol=2)
+        ax.legend(prop={"family": _CJK_FONT_FAMILY, "size": 7}, loc="upper right", ncol=2)
     ax.set_xlim(0, sr / 2)
     fig.tight_layout()
     _save_fig(fig, output_path)
@@ -270,9 +295,9 @@ def _analyze_zcr(samples, sr, output_path):
     ax = fig.add_subplot(111)
     ax.plot(times, zcr, color="#e91e63", linewidth=0.7)
     ax.fill_between(times, zcr, alpha=0.15, color="#e91e63")
-    ax.set_xlabel("时间 (s)", fontproperties="Microsoft YaHei")
-    ax.set_ylabel("ZCR", fontproperties="Microsoft YaHei")
-    ax.set_title("过零率变化", fontproperties="Microsoft YaHei", fontsize=10)
+    ax.set_xlabel("时间 (s)", fontproperties=_CJK_FONT_FAMILY)
+    ax.set_ylabel("ZCR", fontproperties=_CJK_FONT_FAMILY)
+    ax.set_title("过零率变化", fontproperties=_CJK_FONT_FAMILY, fontsize=10)
     fig.tight_layout()
     _save_fig(fig, output_path)
     return {"平均ZCR": f"{np.mean(zcr):.4f}"}
@@ -308,9 +333,9 @@ def _analyze_pitch(samples, sr, output_path):
     fig = _make_fig(10, 3)
     ax = fig.add_subplot(111)
     ax.plot(times, pitch_masked, color="#9c27b0", linewidth=0.8, marker=".", markersize=1)
-    ax.set_xlabel("时间 (s)", fontproperties="Microsoft YaHei")
-    ax.set_ylabel("频率 (Hz)", fontproperties="Microsoft YaHei")
-    ax.set_title("基频变化 (F0)", fontproperties="Microsoft YaHei", fontsize=10)
+    ax.set_xlabel("时间 (s)", fontproperties=_CJK_FONT_FAMILY)
+    ax.set_ylabel("频率 (Hz)", fontproperties=_CJK_FONT_FAMILY)
+    ax.set_title("基频变化 (F0)", fontproperties=_CJK_FONT_FAMILY, fontsize=10)
     ax.set_ylim(f0_min - 20, f0_max + 50)
     fig.tight_layout()
     _save_fig(fig, output_path)
@@ -328,8 +353,11 @@ def _analyze_snr(samples, sr, output_path):
     n_noise = max(1, len(sorted_energy) // 10)
     noise_floor = np.mean(sorted_energy[:n_noise])
     signal_power = np.mean(energy)
-    snr_global = 10 * np.log10(signal_power / (noise_floor + 1e-10))
-    snr_frames = np.clip(10 * np.log10(energy / (noise_floor + 1e-10)), -20, 60)
+    safe_noise_floor = max(float(noise_floor), 1e-10)
+    safe_signal_power = max(float(signal_power), 1e-10)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        snr_global = 10 * np.log10(safe_signal_power / safe_noise_floor)
+        snr_frames = np.clip(10 * np.log10(np.maximum(energy, 1e-10) / safe_noise_floor), -20, 60)
     times = np.arange(len(snr_frames)) * hop_len / sr
 
     fig = _make_fig(10, 3)
@@ -338,10 +366,10 @@ def _analyze_snr(samples, sr, output_path):
     ax.axhline(y=snr_global, color="#ff5722", linestyle="--", linewidth=1,
                label=f"全局 SNR: {snr_global:.1f} dB")
     ax.fill_between(times, snr_frames, alpha=0.1, color="#00bcd4")
-    ax.set_xlabel("时间 (s)", fontproperties="Microsoft YaHei")
-    ax.set_ylabel("SNR (dB)", fontproperties="Microsoft YaHei")
-    ax.set_title("信噪比 (SNR)", fontproperties="Microsoft YaHei", fontsize=10)
-    ax.legend(prop={"family": "Microsoft YaHei", "size": 8})
+    ax.set_xlabel("时间 (s)", fontproperties=_CJK_FONT_FAMILY)
+    ax.set_ylabel("SNR (dB)", fontproperties=_CJK_FONT_FAMILY)
+    ax.set_title("信噪比 (SNR)", fontproperties=_CJK_FONT_FAMILY, fontsize=10)
+    ax.legend(prop={"family": _CJK_FONT_FAMILY, "size": 8})
     fig.tight_layout()
     _save_fig(fig, output_path)
     return {"全局SNR": f"{snr_global:.1f} dB"}
@@ -380,9 +408,9 @@ def _analyze_mfcc(samples, sr, output_path):
     ax = fig.add_subplot(111)
     im = ax.imshow(mfccs.T, aspect="auto", origin="lower", cmap="coolwarm",
                    extent=[times[0], times[-1], 0, n_mfcc])
-    ax.set_xlabel("时间 (s)", fontproperties="Microsoft YaHei")
-    ax.set_ylabel("MFCC 系数", fontproperties="Microsoft YaHei")
-    ax.set_title("梅尔倒谱系数 (MFCC)", fontproperties="Microsoft YaHei", fontsize=10)
+    ax.set_xlabel("时间 (s)", fontproperties=_CJK_FONT_FAMILY)
+    ax.set_ylabel("MFCC 系数", fontproperties=_CJK_FONT_FAMILY)
+    ax.set_title("梅尔倒谱系数 (MFCC)", fontproperties=_CJK_FONT_FAMILY, fontsize=10)
     fig.colorbar(im, ax=ax, label="幅值")
     fig.tight_layout()
     _save_fig(fig, output_path)
@@ -401,9 +429,9 @@ def _analyze_crest(samples, sr, output_path):
     fig = _make_fig(10, 3)
     ax = fig.add_subplot(111)
     ax.plot(times, crest_db, color="#795548", linewidth=0.7)
-    ax.set_xlabel("时间 (s)", fontproperties="Microsoft YaHei")
-    ax.set_ylabel("峰值因子 (dB)", fontproperties="Microsoft YaHei")
-    ax.set_title("峰值因子 (Crest Factor)", fontproperties="Microsoft YaHei", fontsize=10)
+    ax.set_xlabel("时间 (s)", fontproperties=_CJK_FONT_FAMILY)
+    ax.set_ylabel("峰值因子 (dB)", fontproperties=_CJK_FONT_FAMILY)
+    ax.set_title("峰值因子 (Crest Factor)", fontproperties=_CJK_FONT_FAMILY, fontsize=10)
     fig.tight_layout()
     _save_fig(fig, output_path)
     return {"平均峰值因子": f"{np.mean(crest_db):.1f} dB"}
@@ -430,9 +458,9 @@ def _analyze_entropy(samples, sr, output_path):
     ax = fig.add_subplot(111)
     ax.plot(times, entropy_norm, color="#4caf50", linewidth=0.7)
     ax.fill_between(times, entropy_norm, alpha=0.15, color="#4caf50")
-    ax.set_xlabel("时间 (s)", fontproperties="Microsoft YaHei")
-    ax.set_ylabel("归一化频谱熵", fontproperties="Microsoft YaHei")
-    ax.set_title("频谱熵 (Spectral Entropy)", fontproperties="Microsoft YaHei", fontsize=10)
+    ax.set_xlabel("时间 (s)", fontproperties=_CJK_FONT_FAMILY)
+    ax.set_ylabel("归一化频谱熵", fontproperties=_CJK_FONT_FAMILY)
+    ax.set_title("频谱熵 (Spectral Entropy)", fontproperties=_CJK_FONT_FAMILY, fontsize=10)
     ax.set_ylim(0, 1.05)
     fig.tight_layout()
     _save_fig(fig, output_path)
@@ -456,9 +484,9 @@ def _analyze_spectrogram(samples, sr, output_path):
     ax = fig.add_subplot(111)
     im = ax.imshow(mag_db.T, aspect="auto", origin="lower", cmap="inferno",
                    extent=[times[0], times[-1], freqs[0], freqs[-1]])
-    ax.set_xlabel("时间 (s)", fontproperties="Microsoft YaHei")
-    ax.set_ylabel("频率 (Hz)", fontproperties="Microsoft YaHei")
-    ax.set_title("语谱图 (Spectrogram)", fontproperties="Microsoft YaHei", fontsize=10)
+    ax.set_xlabel("时间 (s)", fontproperties=_CJK_FONT_FAMILY)
+    ax.set_ylabel("频率 (Hz)", fontproperties=_CJK_FONT_FAMILY)
+    ax.set_title("语谱图 (Spectrogram)", fontproperties=_CJK_FONT_FAMILY, fontsize=10)
     fig.colorbar(im, ax=ax, label="幅度 (dB)")
     ax.set_ylim(0, min(8000, sr / 2))
     fig.tight_layout()

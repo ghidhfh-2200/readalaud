@@ -268,7 +268,7 @@ def _build_tts_settings_section(self, read_frame):
     self.tts_tree.verticalHeader().setVisible(False)
     self.tts_tree.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
     self.tts_tree.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
-    self.tts_tree.itemSelectionChanged.connect(lambda: on_treeview_click(self, None, self._get_selected_tts_row_values()))
+    self.tts_tree.itemSelectionChanged.connect(lambda: on_treeview_click(self, None, _get_selected_tts_row_values(self)))
     table_layout.addWidget(self.tts_tree)
     self.settings_container_layout.addWidget(table_frame, 1)
 

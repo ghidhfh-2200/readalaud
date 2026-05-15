@@ -59,7 +59,7 @@ class GUIService:
             return False
         return None
 
-    def create_toplevel(self, title, size=None, parent=None, resizable=(False, False), modal=False, center=True):
+    def create_toplevel(self, title, size=None, parent=None, resizable=(False, False), modal=False, center=True, show=True):
         ensure_app()
         master = self._parent(parent)
         # Use QDialog for all toplevels so they appear as independent windows
@@ -84,8 +84,9 @@ class GUIService:
                 window.setWindowModality(QtCore.Qt.WindowModality.ApplicationModal)
             except Exception:
                 pass
-        # Show as a separate dialog window (non-blocking)
-        window.show()
+        # Show as a separate dialog window (non-blocking) if requested
+        if show:
+            window.show()
         return window
 
     @staticmethod

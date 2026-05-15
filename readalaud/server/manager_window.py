@@ -8,6 +8,7 @@ import threading
 import re
 from PySide6 import QtCore, QtWidgets, QtGui
 from ..gui.gui_service import get_gui_service
+from ..gui.qt_helpers import run_on_ui
 
 from .process_manager import check_if_server_running, server_pid, end_server_process
 
@@ -80,9 +81,8 @@ def _roll_check(self, event, task_list=None, pid_lbl=None):
                     if pid_lbl.text() != pid_text:
                         pid_lbl.setText(pid_text)
 
-            label_widget = getattr(self, "state_label", None)
-            if label_widget:
-                QtCore.QTimer.singleShot(0, update_ui)
+            # Use the shared Qt UI dispatcher so the callback always executes on the main thread.
+            run_on_ui(update_ui)
         except Exception:
             pass
 
@@ -90,6 +90,11 @@ def _roll_check(self, event, task_list=None, pid_lbl=None):
 
 
 def _start_state_roll_check(self, task_list=None, pid_lbl=None):
+    if getattr(self, "event", None) is not None:
+        try:
+            self.event.set()
+        except Exception:
+            pass
     self.event = threading.Event()
     self.check_thread = threading.Thread(
         target=_roll_check, daemon=True,
@@ -100,6 +105,16 @@ def _start_state_roll_check(self, task_list=None, pid_lbl=None):
 
 def _on_exit(event, root):
     event.set()
+    try:
+        if root is not None and hasattr(root, "close"):
+            root.close()
+    except Exception:
+        pass
+    try:
+        if root is not None:
+            root.deleteLater()
+    except Exception:
+        pass
     try:
         root.close()
     except Exception:
@@ -166,6 +181,30 @@ def start_manager(self=None):
     if self:
         self.task_list = task_list
         self.pid_lbl = pid_lbl
+
+    # 初始同步检查一次服务器状态，立刻更新 UI（避免等待后台线程首个周期）
+    try:
+        if_server_running = check_if_server_running()
+        server_text = "正在运行" if if_server_running else "关闭"
+        current_pid = server_pid()
+        list_items = [f"PID: {current_pid} (Port 8008)"] if current_pid else []
+        if self:
+            if getattr(self, "state_label", None):
+                self.state_label.setText(server_text)
+        # 更新本地列表控件
+        try:
+            current_items = [task_list.item(i).text() for i in range(task_list.count())]
+        except Exception:
+            current_items = []
+        if list(current_items) != list_items:
+            task_list.clear()
+            for i in list_items:
+                task_list.addItem(i)
+        if pid_lbl:
+            pid_text = f"进程ID: {current_pid}" if current_pid else "进程ID: -"
+            pid_lbl.setText(pid_text)
+    except Exception:
+        pass
 
     _start_state_roll_check(self=self, task_list=task_list, pid_lbl=pid_lbl)
     server_manager_window.destroyed.connect(lambda _e=None: _on_exit(self.event, server_manager_window))
