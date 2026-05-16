@@ -8,7 +8,6 @@ TTS 语音提示相关 GUI 辅助函数：
     - 测试语音 & 保存 TTS 设置
 """
 
-import asyncio
 import os
 import shutil
 import threading
@@ -102,12 +101,23 @@ def _generate_more_vloices_window(self, source):
         return
     if source == "web":
         self.gui.info(message="已切换到EdgeTTS！\nEdgeTTS暂不支持更换语音")
-        get_tts_selected = self.tts_tree.selection()[0]
-        current_values = list(self.tts_tree.item(get_tts_selected, "values"))
+        # QTableWidget: use currentRow() and helper getters/setters
+        get_tts_selected = self.tts_tree.currentRow()
+        if get_tts_selected is None or get_tts_selected < 0:
+            return
+        current_values = list(self._get_tts_row_values(get_tts_selected) or ["", "", "", "", "", ""])
+        while len(current_values) < 6:
+            current_values.append("")
         current_values[4] = "EdgeTTS Default"
         current_values[5] = source
-        self.tts_tree.item(get_tts_selected, values=current_values)
-        self.voice_menu.configure(text="EdgeTTS Default")
+        self._set_tts_row_values(get_tts_selected, current_values)
+        try:
+            self.voice_var.set("EdgeTTS Default")
+        except Exception:
+            try:
+                self.voice_menu.setText("EdgeTTS Default")
+            except Exception:
+                pass
         return
     self.if_all_voices_window_showed = True
     self.more_voices_window = self.gui.create_toplevel(
@@ -512,13 +522,10 @@ def test_tts(self):
         def on_complete():
             self.if_generating_ttstest = False
 
-        loop = asyncio.get_event_loop()
-        result = loop.run_until_complete(
-            tts.test_tts(
-                args=[get_context, get_volume, get_speed, get_voice, get_source],
-                current_account=self.current_acount,
-                on_finish=on_complete,
-            )
+        result = tts.test_tts(
+            args=[get_context, get_volume, get_speed, get_voice, get_source],
+            current_account=self.current_acount,
+            on_finish=on_complete,
         )
         if result == "ok":
             pass

@@ -141,7 +141,7 @@ def play_cached_web_tts(text, volume, speed, output_path):
     threading.Thread(target=_generate_and_play).start()
 
 
-async def test_tts(args: list, current_account, on_finish=None):
+def test_tts(args: list, current_account, on_finish=None):
     """语音生成器测试（GUI 回调用）。"""
     source = args[4] if len(args) > 4 else "local"
     if source == "web":
