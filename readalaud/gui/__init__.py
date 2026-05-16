@@ -35,6 +35,9 @@ from .tts_gui import (
   _on_tts_mode_changed,
   _on_custom_mode_changed,
   _run_custom_action,
+  _get_selected_tts_row_id,
+  _get_tts_row_values,
+  _set_tts_row_values,
 )
 from .reading_gui import _generate_reading_gui
 from .data_gui import _generate_data_gui
@@ -62,4 +65,7 @@ def bind_gui(instance):
     instance.on_tts_mode_changed = lambda event=None: _on_tts_mode_changed(instance, event)
     instance.on_custom_mode_changed = lambda event=None: _on_custom_mode_changed(instance, event)
     instance.run_custom_tts_action = lambda: _run_custom_action(instance)
+    instance._get_selected_tts_row_id = lambda: _get_selected_tts_row_id(instance)
+    instance._get_tts_row_values = lambda row: _get_tts_row_values(instance, row)
+    instance._set_tts_row_values = lambda row, values: _set_tts_row_values(instance, row, values)
     instance.generate_data_gui = lambda: _generate_data_gui(instance)

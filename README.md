@@ -311,15 +311,14 @@ python main.py
 
 ## 联系方式 (Contact)
 
-- **项目主页**: https://github.com/yourusername/ReadAlaud
-- **Issue Tracker**: https://github.com/yourusername/ReadAlaud/issues
-- **讨论区**: https://github.com/yourusername/ReadAlaud/discussions
+- **项目主页**: https://github.com/ghidhfh-2200/ReadAlaud
+- **Issue Tracker**: https://github.com/ghidhfh-2200/ReadAlaud/issues
+- **讨论区**: https://github.com/ghidhfh-2200/ReadAlaud/discussions
 
 ## 路线图 (Roadmap)
 
 ### 计划中的功能 (Planned Features)
 
-- [ ] 更加现代的界面
 - [ ] 自动化控制与开机自启动
 - [ ] 多实例集成控制
 - [ ] 备份与传输

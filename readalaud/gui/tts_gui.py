@@ -759,8 +759,9 @@ def _record_custom_tts_audio(self):
             rec_state["thread"] = threading.Thread(target=_reader_loop, daemon=True)
             rec_state["thread"].start()
             status_var.set("录音中...")
-            popup.after(10000, _auto_stop_if_needed)
+            QtCore.QTimer.singleShot(10000, _auto_stop_if_needed)
         except Exception as e:
+            print(e)
             status_var.set(f"录音启动失败: {e}")
 
     def _auto_stop_if_needed():
