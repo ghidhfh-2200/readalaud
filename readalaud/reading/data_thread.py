@@ -167,6 +167,7 @@ def data_thread(ipc_queue, ui_queue, instance):
                 ui_queue.put(update_payload)
 
             if "end_sig" in data:
+                
                 instance.log_operation("收到结束信号", "准备写回日统计与合并音频")
                 instance.tts_detection_enabled = False
                 request_stop_all_tts()
@@ -184,7 +185,18 @@ def data_thread(ipc_queue, ui_queue, instance):
                     "efficiency":    float(instance.read_today_data["efficiency"]),
                 }
                 print("正在合并缓存...")
+                # 在写入日统计并合并音频前，先把未写入的 db_list（音量数组）也刷新到数据库
+                try:
+                    if db_list:
+                        write_db_data(db_list=db_list, acount=getattr(instance, "current_acount"), date=get_date)
+                        # 清空本地缓存，防止重复写入
+                        db_list = []
+                        write_count = 0
+                except Exception:
+                    pass
+
                 month_str = "-".join(get_date.split("-")[0:2])
+                os.makedirs(f"./data/{current_account}/{month_str}", exist_ok=True)
                 with open(f"./data/{current_account}/{month_str}/{get_date}.json", "w", encoding="utf-8") as f:
                     json.dump(write_data, f)
                 time.sleep(2)
