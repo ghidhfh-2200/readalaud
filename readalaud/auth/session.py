@@ -1,14 +1,19 @@
 """
 session.py —— 登录、注册、注销、删号、重置数据的会话管理逻辑。
 """
-import json
 import base64
+import json
 import os
 import shutil
-import hashlib
-import secrets
 import time
-from .account_io import load_accounts, save_accounts, ensure_user_dir, DEFAULT_SETTINGS
+from .account_io import (
+    DEFAULT_SETTINGS,
+    ensure_user_dir,
+    hash_password,
+    load_accounts,
+    save_accounts,
+    verify_password,
+)
 
 
 LOGIN_LOCK_DURATIONS = [30, 60, 300, 600, 3600, 10800, 86400]
@@ -166,12 +171,10 @@ def _register_new_account(self, username, password, read_json):
     if not self.gui.ask_yes_no(title="注册新账号？", message="此操作将会注册新账号\n是否继续？"):
         self.log_warning("取消注册", f"用户取消注册账户 {username}")
         return
-    
+
     encode_acount = base64.urlsafe_b64encode(username.encode("utf-8")).decode("utf-8")
-    salt = secrets.token_hex(16)
-    hashed_pwd = hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
-    encode_password = f"{salt}${hashed_pwd}"
-    
+    encode_password = hash_password(password)
+
     read_json["names"].append(encode_acount)
     read_json["passwords"][encode_acount] = encode_password
     self.current_acount = encode_acount
@@ -211,25 +214,7 @@ def _try_login(self, encoded_account, raw_password, read_json, read_passwords):
         _stop_login_lock_ui_countdown(self)
 
     stored_password = read_passwords[encoded_account]
-
-    if "$" in stored_password:
-        salt, expected_hash = stored_password.split("$", 1)
-        input_password_hash = hashlib.sha256((salt + raw_password).encode("utf-8")).hexdigest()
-        is_valid = (expected_hash == input_password_hash)
-    else:
-        # Legacy passwords
-        input_password_hash = hashlib.sha256(raw_password.encode("utf-8")).hexdigest()
-        is_valid = (stored_password == input_password_hash)
-
-    is_legacy = False
-    if not is_valid and "$" not in stored_password:
-        try:
-            decode_password = base64.urlsafe_b64decode(stored_password).decode("utf-8")
-            if decode_password == raw_password:
-                is_valid = True
-                is_legacy = True
-        except Exception:
-            pass
+    is_valid, upgraded_hash = verify_password(raw_password, stored_password)
 
     if not is_valid:
         self.log_warning("登录失败", "密码错误")
@@ -246,12 +231,9 @@ def _try_login(self, encoded_account, raw_password, read_json, read_passwords):
     _stop_login_lock_ui_countdown(self)
     _set_login_ui_status(self, "登录成功", "success")
 
-    # Migrate legacy base64 or unsalted sha256 to salted hash
-    if "$" not in stored_password:
-        
-        salt = secrets.token_hex(16)
-        hashed_pwd = hashlib.sha256((salt + raw_password).encode("utf-8")).hexdigest()
-        read_json["passwords"][encoded_account] = f"{salt}${hashed_pwd}"
+    # 自动从旧格式迁移到 bcrypt
+    if upgraded_hash:
+        read_json["passwords"][encoded_account] = upgraded_hash
         try:
             save_accounts(read_json)
         except Exception as e:
@@ -312,25 +294,16 @@ def _delete_the_account(self):
             if not stored_password:
                 self.gui.error(message="无法验证密码（账户数据缺失）")
                 return
-            is_valid = False
-            if "$" in stored_password:
-                salt, expected_hash = stored_password.split("$", 1)
-                input_hash = hashlib.sha256((salt + pwd).encode("utf-8")).hexdigest()
-                is_valid = (input_hash == expected_hash)
-            else:
-                # legacy
-                input_hash = hashlib.sha256(pwd.encode("utf-8")).hexdigest()
-                if stored_password == input_hash:
-                    is_valid = True
-                else:
-                    try:
-                        if base64.urlsafe_b64decode(stored_password).decode("utf-8") == pwd:
-                            is_valid = True
-                    except Exception:
-                        pass
+            is_valid, upgraded_hash = verify_password(pwd, stored_password)
             if not is_valid:
                 self.gui.error(message="密码错误，操作已取消")
                 return
+            if upgraded_hash:
+                accounts["passwords"][self.current_acount] = upgraded_hash
+                try:
+                    save_accounts(accounts)
+                except Exception:
+                    pass
         except Exception as e:
             self.log_error("删除账户前密码验证失败", str(e))
             self.gui.error(message="验证密码时发生错误，已取消操作")
@@ -397,24 +370,16 @@ def _reset_account_data(self):
             if not stored_password:
                 self.gui.error(message="无法验证密码（账户数据缺失）")
                 return
-            is_valid = False
-            if "$" in stored_password:
-                salt, expected_hash = stored_password.split("$", 1)
-                input_hash = hashlib.sha256((salt + pwd).encode("utf-8")).hexdigest()
-                is_valid = (input_hash == expected_hash)
-            else:
-                input_hash = hashlib.sha256(pwd.encode("utf-8")).hexdigest()
-                if stored_password == input_hash:
-                    is_valid = True
-                else:
-                    try:
-                        if base64.urlsafe_b64decode(stored_password).decode("utf-8") == pwd:
-                            is_valid = True
-                    except Exception:
-                        pass
+            is_valid, upgraded_hash = verify_password(pwd, stored_password)
             if not is_valid:
                 self.gui.error(message="密码错误，操作已取消")
                 return
+            if upgraded_hash:
+                accounts["passwords"][self.current_acount] = upgraded_hash
+                try:
+                    save_accounts(accounts)
+                except Exception:
+                    pass
         except Exception as e:
             self.log_error("重置数据前密码验证失败", str(e))
             self.gui.error(message="验证密码时发生错误，已取消操作")

@@ -1,13 +1,12 @@
 """
 settings_io.py —— 读取/保存用户设置（goal、stop-dur、db-level、账号、密码、主题）。
 """
-import hashlib
-import json
 import base64
+import json
 import os
-import secrets
 from PySide6 import QtCore, QtWidgets
 
+from ..auth.account_io import hash_password, verify_password
 from .tts_settings import save_tts_settings
 
 DEFAULT_SETTINGS = {"goal": 0, "stop-dur": 0, "db-level": 0, "calibration": 94, "theme": "darkly", "if_tts": 0}
@@ -158,7 +157,7 @@ def _popup_auth_confirm(self, option):
 
 
 def _verify_current_password(self, input_pwd):
-    """内部使用的密码验证函数"""
+    """内部使用的密码验证函数——委托给共享的 verify_password。"""
     try:
         with open("./data/acounts.json", "r") as f:
             read_accounts = json.load(f)
@@ -166,18 +165,15 @@ def _verify_current_password(self, input_pwd):
         if not stored_password:
             return False
 
-        if "$" in stored_password:
-            salt, expected_hash = stored_password.split("$", 1)
-            return hashlib.sha256((salt + input_pwd).encode("utf-8")).hexdigest() == expected_hash
-        else:
-            if stored_password == hashlib.sha256(input_pwd.encode("utf-8")).hexdigest():
-                return True
+        is_valid, upgraded_hash = verify_password(input_pwd, stored_password)
+        if is_valid and upgraded_hash:
+            read_accounts["passwords"][self.current_acount] = upgraded_hash
             try:
-                if base64.urlsafe_b64decode(stored_password).decode("utf-8") == input_pwd:
-                    return True
+                with open("./data/acounts.json", "w") as f:
+                    json.dump(read_accounts, f)
             except Exception:
                 pass
-        return False
+        return is_valid
     except Exception:
         return False
 
@@ -226,19 +222,16 @@ def _save_password(self):
         self.log_error("修改密码失败", "新密码为空")
         self.gui.warning(message="新密码不能为空!")
         return
-    
+
     try:
         with open("./data/acounts.json", "r") as f:
             read_accounts = json.load(f)
-        
-        # 加盐保存新密码
-        new_salt = secrets.token_hex(16)
-        new_hashed_pwd = hashlib.sha256((new_salt + new_password).encode("utf-8")).hexdigest()
-        read_accounts["passwords"][self.current_acount] = f"{new_salt}${new_hashed_pwd}"
-        
+
+        read_accounts["passwords"][self.current_acount] = hash_password(new_password)
+
         with open("./data/acounts.json", "w") as f:
             json.dump(read_accounts, f)
-        
+
         self.settings_password_value.set("")
         self.gui.info(message="密码修改成功!")
         self.log_audit("敏感操作成功", "通过验证后成功修改了账户密码")

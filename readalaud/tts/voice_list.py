@@ -31,5 +31,4 @@ def get_web_voices():
 
     thread = threading.Thread(target=_run)
     thread.start()
-    thread.join()
     return voices
