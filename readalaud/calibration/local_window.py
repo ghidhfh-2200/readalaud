@@ -9,9 +9,7 @@ local_window.py —— 本地 Tk 窗口麦克风校准。
 
 from __future__ import annotations
 
-import json
 import math
-import os
 import threading
 from typing import Optional
 
@@ -21,6 +19,7 @@ import numpy as np
 
 from ..gui.gui_service import get_gui_service
 from ..gui.qt_helpers import run_on_ui
+from ..settings import get_setting, update_setting
 
 _DEFAULT_CALIBRATION = 94.0
 _CHUNK = 1024
@@ -33,32 +32,15 @@ def bind_calibration_api(instance):
     instance.start_calibration = lambda: start_calibration(instance)
 
 
-def _settings_path(current_acount: str) -> str:
-    return os.path.join(".", "data", current_acount, "settings.json")
-
-
 def _load_calibration(current_acount: str) -> float:
-    path = _settings_path(current_acount)
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return float(data.get("calibration", _DEFAULT_CALIBRATION))
+        return float(get_setting("calibration", _DEFAULT_CALIBRATION))
     except Exception:
         return float(_DEFAULT_CALIBRATION)
 
 
 def _save_calibration(current_acount: str, offset: float) -> None:
-    path = _settings_path(current_acount)
-    payload = {}
-    if os.path.exists(path):
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                payload = json.load(f)
-        except Exception:
-            payload = {}
-    payload["calibration"] = float(offset)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
+    update_setting("calibration", float(offset))
 
 
 class _CalibrationWindowController:

@@ -14,6 +14,7 @@ from .account_io import (
     save_accounts,
     verify_password,
 )
+from ..settings import init_settings_cache, init_tts_cache
 
 
 LOGIN_LOCK_DURATIONS = [30, 60, 300, 600, 3600, 10800, 86400]
@@ -253,6 +254,10 @@ def _try_login(self, encoded_account, raw_password, read_json, read_passwords):
         read_settings = DEFAULT_SETTINGS.copy()
         with open(f"{user_data_path}/settings.json", "w") as f:
             json.dump(read_settings, f)
+
+    # 初始化全局设置缓存
+    init_settings_cache(encoded_account)
+    init_tts_cache(encoded_account)
 
     self.welcome_page(destroy_window=[self.login_frame, "login"])
     self.log_success("登录成功", "账户成功登录系统")

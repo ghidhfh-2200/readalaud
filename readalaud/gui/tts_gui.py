@@ -535,22 +535,6 @@ def test_tts(self):
         self.if_generating_ttstest = False
 
 
-# ──────────────────────── 保存 TTS 设置 ────────────────────────
-
-def save_tts_setting(self):
-    value_list = []
-    for row in range(self.tts_tree.rowCount()):
-        row_values = [self.tts_tree.item(row, c).text() if self.tts_tree.item(row, c) else "" for c in range(6)]
-        while len(row_values) < 6:
-            row_values.append("")
-        value_list.append(row_values)
-    if self.if_tts_enabled.get() == True:
-        final_list = [1, value_list]
-    elif self.if_tts_enabled.get() == False:
-        final_list = [0, value_list]
-    self.save_tts_settings(final_list)
-
-
 def stop_tts_test(self):
     """停止测试音频播放（当前支持自定义 WAV 预览）。"""
     if not getattr(self, "if_generating_ttstest", False):

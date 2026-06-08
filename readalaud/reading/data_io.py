@@ -6,6 +6,8 @@ import json
 import os
 import datetime
 
+from ..settings import get_settings_cache
+
 
 def _read_day_json(acount, date_obj):
     month_str = date_obj.strftime("%Y-%m")
@@ -86,8 +88,7 @@ def load_today_reading_status(current_acount, load_settings=None):
         return {}
 
     if load_settings is None:
-        from ..settings.settings_io import load_settings_data
-        load_settings, _ = load_settings_data(current_acount)
+        load_settings = get_settings_cache()
 
     today = datetime.datetime.now().date()
     today_data = _read_day_json(current_acount, today) or {}

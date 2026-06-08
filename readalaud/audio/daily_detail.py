@@ -7,6 +7,7 @@ import time
 from datetime import datetime, timedelta
 
 from .chart_builder import save_volume_chart
+from ..settings import get_setting
 
 
 def fetch_for_daily_data(self, date_input, force_refresh=False):
@@ -42,7 +43,6 @@ def fetch_for_daily_data(self, date_input, force_refresh=False):
     db_csv_path = os.path.join(details_dir, "DB.csv")
     vol_chart_path = os.path.join(details_dir, "volume_chart.png")
     cache_path = os.path.join(details_dir, "daily_cache.json")
-    config_path = f"./data/{account}/settings.json"
 
     if not force_refresh and os.path.exists(cache_path):
         try:
@@ -55,7 +55,7 @@ def fetch_for_daily_data(self, date_input, force_refresh=False):
         except (json.JSONDecodeError, OSError, KeyError):
             pass
 
-    if not os.path.exists(json_path) or not os.path.exists(config_path):
+    if not os.path.exists(json_path):
         return {}
 
     result = {
@@ -72,11 +72,7 @@ def fetch_for_daily_data(self, date_input, force_refresh=False):
         "real_read_time": 0,
     }
 
-    try:
-        with open(config_path, "r") as f:
-            get_goal = json.load(f).get("goal", 0)
-    except json.JSONDecodeError:
-        return {}
+    get_goal = int(get_setting("goal", 0) or 0)
 
     try:
         with open(json_path, "r") as f:

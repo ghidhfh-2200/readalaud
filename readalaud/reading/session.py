@@ -14,6 +14,7 @@ from PySide6 import QtWidgets
 from multiprocessing import get_context
 from ..gui.gui_service import get_gui_service
 from ..logger.log_manager import log_system
+from ..settings import get_settings_cache, get_setting, get_tts_cache, update_setting
 
 from readalaud.server import start_socket_server, check_if_server_running, server_pid, end_server_process
 
@@ -59,43 +60,42 @@ def reading_data_get_and_check(self):
     except Exception:
         pass
     get_date = datetime.datetime.now().strftime("%Y-%m-%d")
+
+    # 使用全局设置缓存
+    self.load_settings = get_settings_cache()
+
     try:
-        with open(f"./data/{self.current_acount}/settings.json", "r", encoding="utf-8") as f:
-            self.load_settings = json.load(f)
         log("已成功加载配置文件！", self)
         if self.load_settings.get("if_tts") == 1:
-            try:
-                with open(f"./data/{self.current_acount}/tts_config.json", "r", encoding="utf-8") as f:
-                    self.tts_read = json.load(f)
+            tts_cache = get_tts_cache()
+            if tts_cache:
+                self.tts_read = tts_cache
                 log("成功加载TTS设置文件！", self)
-            except FileNotFoundError:
-                self.load_settings["if_tts"] = 0
-                with open(f"./data/{self.current_acount}/settings.json", "w", encoding="utf-8") as f:
-                    json.dump(self.load_settings, f)
-                log("无法读取到TTS设置文件，已自动重置,请重新读取", self)
+            else:
+                # 缓存为空，尝试从磁盘加载
                 try:
-                    self.reading_state_label.setText("出错！")
-                    self.reading_state_label.setStyleSheet("color: red;")
-                except Exception:
-                    pass
+                    with open(f"./data/{self.current_acount}/tts_config.json", "r", encoding="utf-8") as f:
+                        self.tts_read = json.load(f)
+                    log("从磁盘加载TTS设置文件！", self)
+                except FileNotFoundError:
+                    self.load_settings["if_tts"] = 0
+                    update_setting("if_tts", 0)
+                    log("无法读取到TTS设置文件，已自动重置,请重新读取", self)
+                    try:
+                        self.reading_state_label.setText("出错！")
+                        self.reading_state_label.setStyleSheet("color: red;")
+                    except Exception:
+                        pass
         else:
             self.tts_read = None
-    except FileNotFoundError:
-        self.log_error("读取朗读设置失败", "settings.json 缺失，已重置默认配置")
-        try:
-            os.mkdir(f"./data/{self.current_acount}/{'-'.join(get_date.split('-')[0:2])}")
-        except Exception:
-            pass
-        write_data = {"goal": 0, "stop-dur": 0, "db-level": 0, "calibration": 94, "theme": "darkly", "if_tts": 0}
-        with open(f"./data/{self.current_acount}/settings.json", "w", encoding="utf-8") as f:
-            json.dump(write_data, f)
-        log("无法读取配置文件，已自动重置", self)
+    except Exception as e:
+        self.log_error("读取朗读设置失败", str(e))
+        self.load_settings = {"goal": 0, "stop-dur": 0, "db-level": 0, "calibration": 94, "theme": "darkly", "if_tts": 0}
         try:
             self.reading_state_label.setText("出错！")
             self.reading_state_label.setStyleSheet("color: red;")
         except Exception:
             pass
-        self.load_settings = write_data
 
     count = 0
     while True:

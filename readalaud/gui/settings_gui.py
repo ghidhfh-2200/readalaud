@@ -1,10 +1,12 @@
 """
-设置页面 GUI：朗读设置、语音提示设置、账号与安全、疑难解答、个性化。
-"""
+设置页面 GUI：朗读设置、语音提示设置、账号与安全、个性化。
 
+所有修改即时更新全局缓存，退出时异步保存，无需「确定/保存」按钮。
+"""
 from PySide6 import QtCore, QtWidgets, QtGui
 from markdown import markdown
-from ..settings import _load_settings
+from ..settings import _load_settings, update_setting, get_tts_cache, update_tts_cache
+from ..settings.tts_settings import _parse_trigger_display
 from .qt_helpers import ValueHolder
 from .tts_gui import (
     on_treeview_click,
@@ -12,7 +14,6 @@ from .tts_gui import (
     speed_scale_change,
     test_tts,
     stop_tts_test,
-    save_tts_setting,
 )
 
 
@@ -26,20 +27,46 @@ def _get_selected_tts_row_values(self):
         return None
 
 
-def _generate_settings_gui(self):
-    # The frame for the settings
-    if self.if_settings_show == True:
-        return
+def _build_tts_cache_from_tree(self):
+    """从 QTableWidget 构建 TTS 缓存字典（供保存前调用）。"""
+    if self.if_tts_enabled.get():
+        cache = {}
+        for row in range(self.tts_tree.rowCount()):
+            row_values = [self.tts_tree.item(row, c).text() if self.tts_tree.item(row, c) else ""
+                          for c in range(6)]
+            while len(row_values) < 6:
+                row_values.append("")
+            condition, value, display = _parse_trigger_display(row_values[0])
+            source = row_values[5] or "local"
+            cache[row] = {
+                "condition": condition,
+                "value":     value,
+                "display":   display,
+                "text":      row_values[1],
+                "rate":      row_values[2],
+                "volume":    row_values[3],
+                "voice":     row_values[4],
+                "source":    source,
+            }
+        update_tts_cache(cache)
     else:
-        self.if_settings_show = True
+        update_tts_cache({})
+
+
+def _generate_settings_gui(self):
+    if self.if_settings_show:
+        return
+    self.if_settings_show = True
+
     # main frame
     self.settings_frame = QtWidgets.QWidget()
     self.settings_layout = QtWidgets.QVBoxLayout(self.settings_frame)
     self.settings_layout.setContentsMargins(10, 10, 10, 10)
     self.main_paned_window.addWidget(self.settings_frame, 7)
-    if self.if_main_window_show == True:
+    if self.if_main_window_show:
         self.content_frame.deleteLater()
         self.if_main_window_show = False
+
     # notebooks
     notebook = QtWidgets.QTabWidget()
     account_frame = QtWidgets.QWidget()
@@ -59,23 +86,16 @@ def _generate_settings_gui(self):
     # ── customize frame ──
     _build_customize_tab(self, customize_frame)
 
-    def _save_tts_and_back():
-        try:
-            save_tts_setting(self)
-        except Exception as e:
-            try:
-                self.log_error("返回前自动保存TTS失败", str(e))
-            except Exception:
-                pass
-            self.gui.error(message=f"自动保存TTS失败：{e}")
-            return
+    # 返回按钮 — 构建 TTS 缓存，即时保存设置到磁盘，然后导航回去
+    def _on_back():
+        _build_tts_cache_from_tree(self)
+        self.save_settings_now()
         self.welcome_page(destroy_window=[self.settings_frame, "settings"])
 
-    # 返回按钮
     back_button = QtWidgets.QPushButton("返回")
     back_button.setFont(QtGui.QFont(self.mainpage_button_font[0], self.mainpage_button_font[1]))
     back_button.setFixedWidth(120)
-    back_button.clicked.connect(_save_tts_and_back)
+    back_button.clicked.connect(_on_back)
     self.settings_layout.addWidget(back_button, 0, QtCore.Qt.AlignmentFlag.AlignRight)
     _load_settings(self=self)
 
@@ -90,6 +110,7 @@ def _build_account_tab(self, account_frame):
 
     am_layout = QtWidgets.QVBoxLayout(account_management_label_frame)
 
+    # 账户名称行（无确定按钮，退出时自动处理）
     name_row = QtWidgets.QWidget()
     name_layout = QtWidgets.QHBoxLayout(name_row)
     name_layout.setContentsMargins(0, 0, 0, 0)
@@ -102,14 +123,11 @@ def _build_account_tab(self, account_frame):
     self.settings_name_value.changed.connect(name_entry.setText)
     name_entry.setText(self.settings_name_value.get())
     name_entry.textChanged.connect(self.settings_name_value.set)
-    account_ok_button = QtWidgets.QPushButton("确定")
-    account_ok_button.setFont(QtGui.QFont(self.mainpage_button_font[0], self.mainpage_button_font[1]))
-    account_ok_button.clicked.connect(lambda: self.save_settings_except_tts("account"))
     name_layout.addWidget(self.account_name_label)
     name_layout.addWidget(name_entry)
-    name_layout.addWidget(account_ok_button)
     am_layout.addWidget(name_row)
 
+    # 密码行（无确定按钮，退出时自动处理）
     password_row = QtWidgets.QWidget()
     password_layout = QtWidgets.QHBoxLayout(password_row)
     password_layout.setContentsMargins(0, 0, 0, 0)
@@ -123,14 +141,11 @@ def _build_account_tab(self, account_frame):
     self.settings_password_value.changed.connect(password_entry.setText)
     password_entry.setText(self.settings_password_value.get())
     password_entry.textChanged.connect(self.settings_password_value.set)
-    account_password_ok_button = QtWidgets.QPushButton("确定")
-    account_password_ok_button.setFont(QtGui.QFont(self.mainpage_button_font[0], self.mainpage_button_font[1]))
-    account_password_ok_button.clicked.connect(lambda: self.save_settings_except_tts(option="password"))
     password_layout.addWidget(password_label)
     password_layout.addWidget(password_entry)
-    password_layout.addWidget(account_password_ok_button)
     am_layout.addWidget(password_row)
 
+    # 账户操作
     account_operation = QtWidgets.QGroupBox("账户操作")
     account_operation.setFont(QtGui.QFont(self.mainpage_button_font[0], self.mainpage_button_font[1]))
     layout.addWidget(account_operation)
@@ -167,11 +182,11 @@ def _build_reading_tab(self, read_frame):
     layout.addWidget(read_basic_settings_labelframe)
     basic_layout = QtWidgets.QVBoxLayout(read_basic_settings_labelframe)
 
-    # 目标设定
+    # 目标设定（即时更新缓存，无确定按钮）
     goal_row = QtWidgets.QWidget()
     goal_layout = QtWidgets.QHBoxLayout(goal_row)
     goal_layout.setContentsMargins(0, 0, 0, 0)
-    self.settings_goal_label = QtWidgets.QLabel("目标设定:")
+    self.settings_goal_label = QtWidgets.QLabel("目标设定(分钟):")
     self.settings_goal_label.setFont(QtGui.QFont("微软雅黑", 13))
     self.settings_goal_value = ValueHolder(0)
     goal_entry = QtWidgets.QLineEdit()
@@ -179,16 +194,12 @@ def _build_reading_tab(self, read_frame):
     goal_entry.setMinimumWidth(260)
     self.settings_goal_value.changed.connect(lambda v: goal_entry.setText(str(v)))
     goal_entry.setText(str(self.settings_goal_value.get()))
-    goal_entry.textChanged.connect(lambda t: self.settings_goal_value.set(float(t) if t else 0))
-    goal_ok_button = QtWidgets.QPushButton("确定")
-    goal_ok_button.setFont(QtGui.QFont(self.mainpage_button_font[0], self.mainpage_button_font[1]))
-    goal_ok_button.clicked.connect(lambda: self.save_settings_except_tts("goal"))
+    goal_entry.textChanged.connect(lambda t: _on_goal_changed(self, t))
     goal_layout.addWidget(self.settings_goal_label)
     goal_layout.addWidget(goal_entry)
-    goal_layout.addWidget(goal_ok_button)
     basic_layout.addWidget(goal_row)
 
-    # 停顿容忍间隔
+    # 停顿容忍间隔（即时更新缓存，无确定按钮）
     stop_row = QtWidgets.QWidget()
     stop_layout = QtWidgets.QHBoxLayout(stop_row)
     stop_layout.setContentsMargins(0, 0, 0, 0)
@@ -200,16 +211,12 @@ def _build_reading_tab(self, read_frame):
     stop_dur_entry.setMinimumWidth(260)
     self.settings_stop_dur_value.changed.connect(lambda v: stop_dur_entry.setText(str(v)))
     stop_dur_entry.setText(str(self.settings_stop_dur_value.get()))
-    stop_dur_entry.textChanged.connect(lambda t: self.settings_stop_dur_value.set(float(t) if t else 0.0))
-    stop_dur_button = QtWidgets.QPushButton("确定")
-    stop_dur_button.setFont(QtGui.QFont(self.mainpage_button_font[0], self.mainpage_button_font[1]))
-    stop_dur_button.clicked.connect(lambda: self.save_settings_except_tts("stop_dur"))
+    stop_dur_entry.textChanged.connect(lambda t: _on_stop_dur_changed(self, t))
     stop_layout.addWidget(self.stop_dur_label)
     stop_layout.addWidget(stop_dur_entry)
-    stop_layout.addWidget(stop_dur_button)
     basic_layout.addWidget(stop_row)
 
-    # 分贝阈值
+    # 分贝阈值（即时更新缓存，无确定按钮）
     db_row = QtWidgets.QWidget()
     db_layout = QtWidgets.QHBoxLayout(db_row)
     db_layout.setContentsMargins(0, 0, 0, 0)
@@ -221,21 +228,48 @@ def _build_reading_tab(self, read_frame):
     db_entry.setMinimumWidth(260)
     self.settings_db_value.changed.connect(lambda v: db_entry.setText(str(v)))
     db_entry.setText(str(self.settings_db_value.get()))
-    db_entry.textChanged.connect(lambda t: self.settings_db_value.set(float(t) if t else 0.0))
-    db_ok_button = QtWidgets.QPushButton("确定")
-    db_ok_button.setFont(QtGui.QFont(self.mainpage_button_font[0], self.mainpage_button_font[1]))
-    db_ok_button.clicked.connect(lambda: self.save_settings_except_tts("db_level"))
+    db_entry.textChanged.connect(lambda t: _on_db_level_changed(self, t))
     db_layout.addWidget(self.settings_db_label)
     db_layout.addWidget(db_entry)
-    db_layout.addWidget(db_ok_button)
     basic_layout.addWidget(db_row)
 
     # ── 语音提示设置 ──
     _build_tts_settings_section(self, read_frame)
 
 
+# ── 即时缓存更新回调 ──────────────────────────────────────
+
+def _on_goal_changed(self, text):
+    try:
+        val = float(text) if text else 0
+    except ValueError:
+        return
+    self.settings_goal_value.set(val)
+    update_setting("goal", int(val * 60))
+
+
+def _on_stop_dur_changed(self, text):
+    try:
+        val = float(text) if text else 0.0
+    except ValueError:
+        return
+    self.settings_stop_dur_value.set(val)
+    update_setting("stop-dur", val)
+
+
+def _on_db_level_changed(self, text):
+    try:
+        val = float(text) if text else 0.0
+    except ValueError:
+        return
+    self.settings_db_value.set(val)
+    update_setting("db-level", val)
+
+
+# ═══════════════════════ TTS 设置区 ═══════════════════════
+
 def _build_tts_settings_section(self, read_frame):
-    """构建语音提示设置区域（TTS Treeview + 音色/音量/语速控件）"""
+    """构建语音提示设置区域（TTS Treeview + 音色/音量/语速控件），无保存按钮。"""
     read_settings_frame = QtWidgets.QGroupBox("语音提示设置")
     read_settings_frame.setFont(QtGui.QFont(self.mainpage_button_font[0], self.mainpage_button_font[1]))
     read_layout = read_frame.layout() or QtWidgets.QVBoxLayout(read_frame)
@@ -249,6 +283,7 @@ def _build_tts_settings_section(self, read_frame):
     self.if_tts_checkbox = QtWidgets.QCheckBox("启用语音提示")
     self.if_tts_checkbox.setFont(QtGui.QFont(self.mainpage_button_font[0], self.mainpage_button_font[1]))
     self.if_tts_checkbox.toggled.connect(lambda v: self.if_tts_enabled.set(v))
+    self.if_tts_checkbox.toggled.connect(lambda v: _on_tts_toggled(self, v))
     self.if_tts_checkbox.toggled.connect(lambda _v: self.enable_or_disable_tts_gui())
     checkbox_layout.addWidget(self.if_tts_checkbox)
     settings_layout.addWidget(checkbox_frame)
@@ -373,7 +408,7 @@ def _build_tts_settings_section(self, read_frame):
     speed_layout.addWidget(self.speed_scale, 1)
     voice_config_layout.addWidget(speed_frame)
 
-    # Save / Test buttons
+    # Test buttons（只保留测试，移除保存）
     buttons_frame = QtWidgets.QWidget()
     buttons_layout = QtWidgets.QHBoxLayout(buttons_frame)
     buttons_layout.setContentsMargins(0, 0, 0, 0)
@@ -386,11 +421,14 @@ def _build_tts_settings_section(self, read_frame):
     self.stop_test_button.setFont(QtGui.QFont(self.mainpage_button_font[0], self.mainpage_button_font[1]))
     self.stop_test_button.clicked.connect(lambda: stop_tts_test(self))
     buttons_layout.addWidget(self.stop_test_button)
-    self.tts_save_button = QtWidgets.QPushButton("保存设置")
-    self.tts_save_button.setFont(QtGui.QFont(self.mainpage_button_font[0], self.mainpage_button_font[1]))
-    self.tts_save_button.clicked.connect(lambda: save_tts_setting(self))
-    buttons_layout.addWidget(self.tts_save_button)
     self.settings_container_layout.addWidget(buttons_frame)
+
+
+def _on_tts_toggled(self, enabled):
+    """TTS 开关切换时即时更新缓存。"""
+    update_setting("if_tts", 1 if enabled else 0)
+    if not enabled:
+        update_tts_cache({})
 
 
 # ═══════════════════════ 个性化 Tab ═══════════════════════
@@ -406,6 +444,5 @@ def _build_customize_tab(self, customize_frame):
     for i in self.get_style_list:
         self.customize_listbox.addItem(i)
     box_layout.addWidget(self.customize_listbox)
-    customize_ok_button = QtWidgets.QPushButton("确认")
-    customize_ok_button.clicked.connect(self.change_theme)
-    box_layout.addWidget(customize_ok_button)
+    # 选择即切换，无确认按钮
+    self.customize_listbox.currentRowChanged.connect(lambda _: self.change_theme())

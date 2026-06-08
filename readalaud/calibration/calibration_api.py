@@ -6,6 +6,8 @@ import os
 import time
 import webview
 
+from ..settings import update_setting
+
 
 class CalibrationAPI:
     """通过 pywebview 暴露给 JavaScript 的 API 对象。"""
@@ -15,12 +17,7 @@ class CalibrationAPI:
 
     def receive_msg(self, msg):
         print(f"RECEIVE MSG:{msg}")
-        settings_path = os.path.join(".", "data", self.current_acount, "settings.json")
-        with open(settings_path, "r", encoding="utf-8") as f:
-            read_json = json.load(f)
-        read_json["calibration"] = msg
-        with open(settings_path, "w", encoding="utf-8") as f:
-            json.dump(read_json, f, ensure_ascii=False, indent=2)
+        update_setting("calibration", msg)
         return "200"
 
     def destroy_window(self):

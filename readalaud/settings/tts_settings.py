@@ -1,12 +1,40 @@
 """
-tts_settings.py —— TTS 语音提示配置的保存与缓存清理。
+tts_settings.py —— TTS 语音提示配置的缓存与异步保存。
 """
 import json
 import os
 import re
 
+from .settings_io import update_setting
+
 DEFAULT_SETTINGS = {"goal": 0, "stop-dur": 0, "db-level": 0, "calibration": 94, "theme": "darkly", "if_tts": 0}
 
+# ── TTS 配置缓存 ──────────────────────────────────────────
+
+_tts_cache: dict = {}
+
+
+def get_tts_cache() -> dict:
+    return _tts_cache
+
+
+def update_tts_cache(config: dict):
+    global _tts_cache
+    _tts_cache = config
+
+
+def init_tts_cache(current_account: str) -> dict:
+    """从磁盘加载 TTS 配置到缓存。"""
+    global _tts_cache
+    try:
+        with open(f"./data/{current_account}/tts_config.json", "r") as f:
+            _tts_cache = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        _tts_cache = {}
+    return _tts_cache
+
+
+# ── 解析触发条件 ──────────────────────────────────────────
 
 def _extract_first_number(text, default=0.0):
     m = re.search(r"[-+]?\d+(?:\.\d+)?", str(text))
@@ -47,55 +75,60 @@ def _parse_trigger_display(display_text):
     return display_text, "0", display_text
 
 
+# ── 即时更新缓存（不写磁盘） ───────────────────────────────
+
 def save_tts_settings(self, args):
-    self.log_operation("调用保存TTS设置", f"if_tts={args[0] if args else 'unknown'}")
+    """更新 TTS 缓存（UI 修改时调用，不写磁盘）。"""
+    self.log_operation("调用更新TTS缓存", f"if_tts={args[0] if args else 'unknown'}")
+
+    update_setting("if_tts", args[0])
+
+    if args[0] == 0:
+        self.enable_or_disable_tts_gui(state=False)
+        _tts_cache.clear()
+    elif args[0] == 1:
+        self.enable_or_disable_tts_gui(state=True)
+        write_list = {}
+        for i, row in enumerate(args[1]):
+            row = list(row)
+            while len(row) < 6:
+                row.append("")
+            condition, value, display = _parse_trigger_display(row[0])
+            source = row[5] or "local"
+            write_list[i] = {
+                "condition": condition,
+                "value":     value,
+                "display":   display,
+                "text":      row[1],
+                "rate":      row[2],
+                "volume":    row[3],
+                "voice":     row[4],
+                "source":    source,
+            }
+        _tts_cache.clear()
+        _tts_cache.update(write_list)
+
+
+# ── 退出时将 TTS 缓存落盘 ──────────────────────────────────
+
+def save_tts_config_to_disk(current_account: str, config: dict):
+    """将 TTS 配置写入磁盘，附带缓存清理（后台线程调用）。"""
+    if not config or not current_account:
+        return
+
+    _clean_outdated_tts_cache(current_account, config)
+
+    tts_config_path = f"./data/{current_account}/tts_config.json"
     try:
-        settings_path = f"./data/{self.current_acount}/settings.json"
-        with open(settings_path, "r") as f:
-            read_settings = json.load(f)
-        read_settings["if_tts"] = args[0]
-        with open(settings_path, "w") as f:
-            json.dump(read_settings, f)
-
-        if args[0] == 0:
-            self.enable_or_disable_tts_gui(state=False)
-        elif args[0] == 1:
-            self.enable_or_disable_tts_gui(state=True)
-            write_list = {}
-            for i, row in enumerate(args[1]):
-                row = list(row)
-                while len(row) < 6:
-                    row.append("")
-                condition, value, display = _parse_trigger_display(row[0])
-                source = row[5] or "local"
-                write_list[i] = {
-                    "condition": condition,
-                    "value":     value,
-                    "display":   display,
-                    "text":      row[1],
-                    "rate":      row[2],
-                    "volume":    row[3],
-                    "voice":     row[4],
-                    "source":    source,
-                }
-            _clean_outdated_tts_cache(self, write_list)
-            tts_config_path = f"./data/{self.current_acount}/tts_config.json"
-            with open(tts_config_path, "w") as f:
-                json.dump(write_list, f)
-    except FileNotFoundError:
-        self.log_error("保存TTS设置失败", "settings.json 不存在，已重建默认配置")
-        settings_path = f"./data/{self.current_acount}/settings.json"
-        with open(settings_path, "w") as f:
-            json.dump(DEFAULT_SETTINGS.copy(), f)
-        self.gui.info(message="无法找到你的设置文件！\n已自动重置，请重新完成所有设置!")
-    except json.JSONDecodeError:
-        self.log_error("保存TTS设置失败", "settings.json JSON 解析失败")
-        self.gui.error(message="设置文件解析失败！\n请不要随意修改data文件夹中的文件！")
+        with open(tts_config_path, "w") as f:
+            json.dump(config, f)
+    except Exception:
+        pass
 
 
-def _clean_outdated_tts_cache(self, new_config):
+def _clean_outdated_tts_cache(current_account: str, new_config: dict):
     """当 TTS 配置变更时，删除对应的旧缓存音频文件。"""
-    tts_config_path = f"./data/{self.current_acount}/tts_config.json"
+    tts_config_path = f"./data/{current_account}/tts_config.json"
     try:
         with open(tts_config_path, "r") as f:
             old_config = json.load(f)
@@ -106,12 +139,11 @@ def _clean_outdated_tts_cache(self, new_config):
         removed_keys = old_keys - new_keys
         for str_i in removed_keys:
             for ext in [".wav", ".mp3"]:
-                file_path = f"./data/{self.current_acount}/tts/{str_i}{ext}"
+                file_path = f"./data/{current_account}/tts/{str_i}{ext}"
                 if os.path.exists(file_path):
                     try:
                         os.remove(file_path)
                     except Exception as e:
-                        self.log_error("清理TTS缓存失败", f"{file_path}: {e}")
                         print(f"Error deleting file {file_path}: {e}")
 
         for i, new_val in new_config.items():
@@ -129,12 +161,11 @@ def _clean_outdated_tts_cache(self, new_config):
 
             if old_val != new_val:
                 for ext in [".wav", ".mp3"]:
-                    file_path = f"./data/{self.current_acount}/tts/{i}{ext}"
+                    file_path = f"./data/{current_account}/tts/{i}{ext}"
                     if os.path.exists(file_path):
                         try:
                             os.remove(file_path)
                         except Exception as e:
-                            self.log_error("清理TTS缓存失败", f"{file_path}: {e}")
                             print(f"Error deleting file {file_path}: {e}")
     except (FileNotFoundError, json.JSONDecodeError):
         pass

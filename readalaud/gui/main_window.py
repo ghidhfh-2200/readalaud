@@ -8,6 +8,8 @@ from PySide6 import QtCore, QtWidgets, QtGui
 from ..calibration import start_calibration
 from ..server import check_if_server_running, server_pid, end_server_process, start_manager
 from ..reading.data_io import load_today_reading_status
+from .qt_helpers import run_on_ui
+from .settings_gui import _build_tts_cache_from_tree
 
 
 # ──────────────────────── 主窗口 ────────────────────────
@@ -81,6 +83,9 @@ def _generate_main_window(self):
     _reset_sidebar_today_status(self)
 
     def _on_close(event):
+        if getattr(self, "_allow_close", False):
+            event.accept()
+            return
         check_if_reading(self)
         event.ignore()
     self.main_window.closeEvent = _on_close
@@ -88,6 +93,25 @@ def _generate_main_window(self):
 
 
 # ──────────────────────── 关闭确认 ────────────────────────
+
+def _save_settings_and_close(self):
+    """构建 TTS 缓存并异步保存设置，然后关闭窗口。"""
+    try:
+        _build_tts_cache_from_tree(self)
+    except Exception:
+        pass
+
+    try:
+        self.save_settings_on_exit(on_finish=lambda: _do_close(self))
+    except Exception:
+        _do_close(self)
+
+
+def _do_close(self):
+    """实际关闭主窗口（必须在主线程调用）。"""
+    self._allow_close = True
+    run_on_ui(lambda: self.main_window.close())
+
 
 def check_if_reading(self):
     if self.if_reading:
@@ -100,7 +124,7 @@ def check_if_reading(self):
             self.if_reading = False
             if_exit = self.gui.ask_yes_no(title="确定要关闭吗？", message="朗读服务器已停止。确认要关闭吗?")
             if if_exit:
-                self.main_window.close()
+                _save_settings_and_close(self)
     else:
         # 检查服务器是否仍在后台运行
         server_running = check_if_server_running()
@@ -114,15 +138,15 @@ def check_if_reading(self):
                 pid = server_pid()
                 if pid:
                     end_server_process(pid=pid, force=True)
-                self.main_window.close()
+                _save_settings_and_close(self)
             elif action is False:
                 # 保留服务器并退出
-                self.main_window.close()
+                _save_settings_and_close(self)
             # action is None (取消): 不做任何事
         else:
             if_exit = self.gui.ask_yes_no(title="确定要关闭吗？", message="确认要关闭吗?")
             if if_exit:
-                self.main_window.close()
+                _save_settings_and_close(self)
 
 
 # ──────────────────────── 欢迎页 / 导航 ────────────────────────
