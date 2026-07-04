@@ -91,45 +91,207 @@ def _bind_mousewheel_to_canvas(_activate_widget, _canvas):
     return
 
 
-def _load_and_display_image(path, parent_frame, width_hint=None):
-    """Auxiliary to load image into a Frame"""
+class _ResponsiveImageLabel(QtWidgets.QLabel):
+    """QLabel that keeps an image scaled to the available space."""
+
+    def __init__(self, parent=None, min_height=140):
+        super().__init__(parent)
+        self._source_pixmap = QtGui.QPixmap()
+        self._aspect_ratio = 16 / 9
+        self._min_height = min_height
+        self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.setMinimumHeight(min_height)
+        self.setStyleSheet("background: #2b2b2b;")
+        self.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Preferred,
+        )
+
+    def set_source_pixmap(self, pixmap):
+        self._source_pixmap = pixmap or QtGui.QPixmap()
+        if not self._source_pixmap.isNull() and self._source_pixmap.height() > 0:
+            self._aspect_ratio = self._source_pixmap.width() / self._source_pixmap.height()
+        self.updateGeometry()
+        self._sync_pixmap()
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        if width <= 0:
+            return self._min_height
+        return max(self._min_height, int(width / max(self._aspect_ratio, 0.1)))
+
+    def sizeHint(self):
+        width = max(self.width(), 640)
+        return QtCore.QSize(width, self.heightForWidth(width))
+
+    def minimumSizeHint(self):
+        return QtCore.QSize(160, self._min_height)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._sync_pixmap()
+
+    def _sync_pixmap(self):
+        if self._source_pixmap.isNull():
+            return
+        target_size = self.contentsRect().size()
+        if target_size.width() <= 0 or target_size.height() <= 0:
+            return
+        scaled = self._source_pixmap.scaled(
+            target_size,
+            QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+            QtCore.Qt.TransformationMode.SmoothTransformation,
+        )
+        super().setPixmap(scaled)
+
+
+class _ResponsiveStatsGroup(QtWidgets.QGroupBox):
+    """Group box that reflows stat labels when the window becomes narrow."""
+
+    def __init__(self, title="", parent=None):
+        super().__init__(title, parent)
+        self._stat_items = []
+        self._record_items = []
+        self._separator = None
+        self._last_columns = 0
+
+    def set_items(self, stat_items, record_items):
+        self._stat_items = stat_items
+        self._record_items = record_items
+        self._last_columns = 0
+        self._reflow()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._reflow()
+
+    def _column_count(self):
+        width = self.contentsRect().width()
+        if width < 520:
+            return 2
+        if width < 760:
+            return 3
+        return 6
+
+    def _reflow(self):
+        layout = self.layout()
+        if layout is None or not self._stat_items:
+            return
+
+        columns = self._column_count()
+        if columns == self._last_columns:
+            return
+        self._last_columns = columns
+
+        while layout.count():
+            item = layout.takeAt(0)
+            if item and item.widget():
+                item.widget().setParent(self)
+
+        for col in range(6):
+            layout.setColumnStretch(col, 0)
+        for col in range(columns):
+            layout.setColumnStretch(col, 1)
+
+        row = 0
+        for idx, (title_label, value_label) in enumerate(self._stat_items):
+            col = idx % columns
+            if idx and col == 0:
+                row += 2
+            layout.addWidget(title_label, row, col)
+            layout.addWidget(value_label, row + 1, col)
+
+        row += 2
+        if self._separator is None:
+            self._separator = QtWidgets.QFrame(self)
+            self._separator.setFrameShape(QtWidgets.QFrame.Shape.HLine)
+            self._separator.setFrameShadow(QtWidgets.QFrame.Shadow.Sunken)
+        layout.addWidget(self._separator, row, 0, 1, columns)
+
+        row += 1
+        for idx, (title_label, value_label) in enumerate(self._record_items):
+            col = idx % columns
+            if idx and col == 0:
+                row += 2
+            layout.addWidget(title_label, row, col)
+            layout.addWidget(value_label, row + 1, col)
+
+
+def _pixmap_from_path(path):
+    pix = QtGui.QPixmap(path)
+    if not pix.isNull():
+        return pix
+
+    pil_img = Image.open(path)
+    qt_img = ImageQt.ImageQt(pil_img)
+    return QtGui.QPixmap.fromImage(qt_img)
+
+
+def _ensure_vbox_layout(parent_frame):
+    layout = parent_frame.layout()
+    if layout is None:
+        layout = QtWidgets.QVBoxLayout(parent_frame)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(0)
+    return layout
+
+
+def _clear_direct_child_widgets(parent_frame):
+    layout = parent_frame.layout()
+    if layout is not None:
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
     for child in parent_frame.findChildren(QtWidgets.QWidget):
         if child.parent() == parent_frame:
             child.deleteLater()
+
+
+def _create_responsive_image_label(path, min_height=140):
+    label = _ResponsiveImageLabel(min_height=min_height)
+    label.set_source_pixmap(_pixmap_from_path(path))
+
+    menu = QtWidgets.QMenu(label)
+    menu.addAction("导出图片", lambda: _export_image(path))
+    label.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
+    label.customContextMenuRequested.connect(lambda pos: menu.exec(label.mapToGlobal(pos)))
+    return label
+
+
+def _load_and_display_image(path, parent_frame, width_hint=None):
+    """Auxiliary to load image into a Frame"""
+    _clear_direct_child_widgets(parent_frame)
 
     if not path or not os.path.exists(path):
         label = QtWidgets.QLabel("暂无图表数据")
         label.setStyleSheet("color: gray; background: #2b2b2b;")
         label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        layout = parent_frame.layout() or QtWidgets.QVBoxLayout(parent_frame)
+        label.setMinimumHeight(120)
+        label.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Preferred,
+        )
+        layout = _ensure_vbox_layout(parent_frame)
         layout.addWidget(label)
         return
 
     try:
-        pil_img = Image.open(path)
-        qt_img = ImageQt.ImageQt(pil_img)
-        pix = QtGui.QPixmap.fromImage(qt_img)
-        label = QtWidgets.QLabel()
-        label.setPixmap(pix)
-        label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        label.setStyleSheet("background: #2b2b2b;")
-        layout = parent_frame.layout() or QtWidgets.QVBoxLayout(parent_frame)
+        min_height = 120 if width_hint is None else max(120, int(width_hint * 0.2))
+        label = _create_responsive_image_label(path, min_height=min_height)
+        layout = _ensure_vbox_layout(parent_frame)
         layout.addWidget(label)
-
-        menu = QtWidgets.QMenu(label)
-        menu.addAction("导出图片", lambda: _export_image(path))
-
-        def show_menu(event):
-            menu.exec(event.globalPos())
-
-        label.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
-        label.customContextMenuRequested.connect(lambda pos: show_menu(QtGui.QContextMenuEvent(QtGui.QContextMenuEvent.Reason.Mouse, pos)))
 
     except Exception as e:
         print(f"Error loading image {path}: {e}")
         label = QtWidgets.QLabel(f"加载失败: {e}")
         label.setStyleSheet("color: red; background: #2b2b2b;")
-        layout = parent_frame.layout() or QtWidgets.QVBoxLayout(parent_frame)
+        label.setWordWrap(True)
+        layout = _ensure_vbox_layout(parent_frame)
         layout.addWidget(label)
 
 def _export_image(src_path):
@@ -157,11 +319,14 @@ def _export_image(src_path):
 
 def _build_general_tab(self, general_frame, register_component):
     layout = QtWidgets.QVBoxLayout(general_frame)
+    layout.setContentsMargins(0, 0, 0, 0)
     scroll = QtWidgets.QScrollArea()
     scroll.setWidgetResizable(True)
+    scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
     scrollable_data_frame = QtWidgets.QWidget()
     scroll_layout = QtWidgets.QVBoxLayout(scrollable_data_frame)
     scroll_layout.setContentsMargins(0, 0, 0, 0)
+    scroll_layout.setSpacing(8)
     scroll.setWidget(scrollable_data_frame)
     layout.addWidget(scroll)
 
@@ -183,14 +348,21 @@ def _build_general_tab(self, general_frame, register_component):
     # LabelFrame: 数据概览
     basic_data_lf = register_component(
         "frames", "general_basic_lf",
-        QtWidgets.QGroupBox("数据概览"),
+        _ResponsiveStatsGroup("数据概览"),
     )
     basic_data_lf.setFont(QtGui.QFont(self.mainpage_button_font[0], self.mainpage_button_font[1]))
     basic_layout = QtWidgets.QGridLayout(basic_data_lf)
+    basic_layout.setColumnStretch(0, 1)
+    basic_layout.setColumnStretch(1, 1)
+    basic_layout.setColumnStretch(2, 1)
+    basic_layout.setColumnStretch(3, 1)
+    basic_layout.setColumnStretch(4, 1)
+    basic_layout.setColumnStretch(5, 1)
     scroll_layout.addWidget(basic_data_lf)
 
     headings_row1 = ["朗读总时长（秒）", "朗读总天数", "平均朗读时长", "当前连续朗读天数", "历史最长天数", "平均效率"]
     self.data_labels = {}
+    stat_items = []
 
     for idx, title in enumerate(headings_row1):
         lbl_title = register_component(
@@ -198,7 +370,12 @@ def _build_general_tab(self, general_frame, register_component):
             QtWidgets.QLabel(title),
         )
         lbl_title.setFont(QtGui.QFont("微软雅黑", 11))
-        basic_layout.addWidget(lbl_title, 0, idx)
+        lbl_title.setWordWrap(True)
+        lbl_title.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        lbl_title.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Preferred,
+        )
 
         lbl_val = register_component(
             "labels", f"general_val_{idx}",
@@ -206,14 +383,16 @@ def _build_general_tab(self, general_frame, register_component):
         )
         lbl_val.setFont(QtGui.QFont("微软雅黑", 13, QtGui.QFont.Weight.Bold))
         lbl_val.setStyleSheet("color: #17a2b8;")
-        basic_layout.addWidget(lbl_val, 1, idx)
+        lbl_val.setWordWrap(True)
+        lbl_val.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        lbl_val.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Preferred,
+        )
         self.data_labels[title] = lbl_val
+        stat_items.append((lbl_title, lbl_val))
 
     # Separator
-    line = QtWidgets.QFrame()
-    line.setFrameShape(QtWidgets.QFrame.Shape.HLine)
-    line.setFrameShadow(QtWidgets.QFrame.Shadow.Sunken)
-    basic_layout.addWidget(line, 2, 0, 1, 6)
 
     # Row 2: 记录
     l_eff_t = register_component(
@@ -221,7 +400,8 @@ def _build_general_tab(self, general_frame, register_component):
         QtWidgets.QLabel("最高效率 (日期)"),
     )
     l_eff_t.setFont(QtGui.QFont("微软雅黑", 11))
-    basic_layout.addWidget(l_eff_t, 3, 1)
+    l_eff_t.setWordWrap(True)
+    l_eff_t.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
 
     lbl_eff = register_component(
         "labels", "general_rec_eff_val",
@@ -229,7 +409,8 @@ def _build_general_tab(self, general_frame, register_component):
     )
     lbl_eff.setFont(QtGui.QFont("微软雅黑", 13, QtGui.QFont.Weight.Bold))
     lbl_eff.setStyleSheet("color: #28a745;")
-    basic_layout.addWidget(lbl_eff, 4, 1)
+    lbl_eff.setWordWrap(True)
+    lbl_eff.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
     self.data_labels["最高效率"] = lbl_eff
 
     l_dur_t = register_component(
@@ -237,7 +418,8 @@ def _build_general_tab(self, general_frame, register_component):
         QtWidgets.QLabel("最长时长 (日期)"),
     )
     l_dur_t.setFont(QtGui.QFont("微软雅黑", 11))
-    basic_layout.addWidget(l_dur_t, 3, 3)
+    l_dur_t.setWordWrap(True)
+    l_dur_t.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
 
     lbl_dur = register_component(
         "labels", "general_rec_dur_val",
@@ -245,8 +427,10 @@ def _build_general_tab(self, general_frame, register_component):
     )
     lbl_dur.setFont(QtGui.QFont("微软雅黑", 13, QtGui.QFont.Weight.Bold))
     lbl_dur.setStyleSheet("color: #dc3545;")
-    basic_layout.addWidget(lbl_dur, 4, 3)
+    lbl_dur.setWordWrap(True)
+    lbl_dur.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
     self.data_labels["最长时长"] = lbl_dur
+    basic_data_lf.set_items(stat_items, [(l_eff_t, lbl_eff), (l_dur_t, lbl_dur)])
 
     # LabelFrame: 数据图表
     charts_lf = register_component(
@@ -255,6 +439,7 @@ def _build_general_tab(self, general_frame, register_component):
     )
     charts_lf.setFont(QtGui.QFont(self.mainpage_button_font[0], self.mainpage_button_font[1]))
     charts_layout = QtWidgets.QVBoxLayout(charts_lf)
+    charts_layout.setSpacing(8)
     scroll_layout.addWidget(charts_lf)
 
     # 热力图 — 标题 + 年份切换
@@ -282,9 +467,14 @@ def _build_general_tab(self, general_frame, register_component):
     charts_layout.addWidget(heatmap_title_frame)
 
     heatmap_container = QtWidgets.QFrame()
-    heatmap_container.setFixedHeight(200)
+    heatmap_container.setMinimumHeight(160)
+    heatmap_container.setSizePolicy(
+        QtWidgets.QSizePolicy.Policy.Expanding,
+        QtWidgets.QSizePolicy.Policy.Preferred,
+    )
     heatmap_container.setStyleSheet("background: #2b2b2b;")
     heatmap_layout = QtWidgets.QVBoxLayout(heatmap_container)
+    heatmap_layout.setContentsMargins(0, 0, 0, 0)
     heatmap_label = QtWidgets.QLabel("[打卡热力图区域]")
     heatmap_label.setStyleSheet("color: #888888;")
     heatmap_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
@@ -305,6 +495,11 @@ def _build_general_tab(self, general_frame, register_component):
     trend_title.setFont(QtGui.QFont("微软雅黑", 12))
     charts_layout.addWidget(trend_title)
     duration_container = QtWidgets.QFrame()
+    duration_container.setMinimumHeight(220)
+    duration_container.setSizePolicy(
+        QtWidgets.QSizePolicy.Policy.Expanding,
+        QtWidgets.QSizePolicy.Policy.Preferred,
+    )
     duration_container.setStyleSheet("background: #2b2b2b;")
     charts_layout.addWidget(duration_container)
     register_component(
@@ -315,6 +510,7 @@ def _build_general_tab(self, general_frame, register_component):
     ph_label.setStyleSheet("color: #888888;")
     ph_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
     duration_layout = QtWidgets.QVBoxLayout(duration_container)
+    duration_layout.setContentsMargins(0, 0, 0, 0)
     duration_layout.addWidget(ph_label)
     self.chart_frame_duration = duration_container
 
@@ -325,10 +521,11 @@ def _build_general_tab(self, general_frame, register_component):
 
 def _build_day_tab(self, day_frame, register_component):
     layout = day_frame.layout() or QtWidgets.QVBoxLayout(day_frame)
+    layout.setContentsMargins(0, 0, 0, 0)
     self._report_window = None
     self.day_list_container = QtWidgets.QWidget()
     self.day_list_container_layout = QtWidgets.QVBoxLayout(self.day_list_container)
-    layout.addWidget(self.day_list_container)
+    layout.addWidget(self.day_list_container, 1)
 
     # Tool Bar for List
     list_tools = QtWidgets.QWidget()
@@ -381,24 +578,33 @@ def _build_day_tab(self, day_frame, register_component):
     self.day_tree.verticalHeader().setVisible(False)
     self.day_tree.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
     self.day_tree.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
-    self.day_list_container_layout.addWidget(self.day_tree)
+    self.day_tree.setSizePolicy(
+        QtWidgets.QSizePolicy.Policy.Expanding,
+        QtWidgets.QSizePolicy.Policy.Expanding,
+    )
+    self.day_tree.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch)
+    self.day_tree.horizontalHeader().setStretchLastSection(True)
+    self.day_list_container_layout.addWidget(self.day_tree, 1)
 
     # Day Detail Container (Hidden initially)
     self.day_detail_container = QtWidgets.QWidget()
-    layout.addWidget(self.day_detail_container)
+    layout.addWidget(self.day_detail_container, 1)
     self.day_detail_container.hide()
     detail_layout = QtWidgets.QVBoxLayout(self.day_detail_container)
+    detail_layout.setContentsMargins(0, 0, 0, 0)
     detail_scroll = QtWidgets.QScrollArea()
     detail_scroll.setWidgetResizable(True)
+    detail_scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
     self.detail_scroll_frame = QtWidgets.QWidget()
     self.detail_scroll_frame_layout = QtWidgets.QVBoxLayout(self.detail_scroll_frame)
     detail_scroll.setWidget(self.detail_scroll_frame)
-    detail_layout.addWidget(detail_scroll)
+    detail_layout.addWidget(detail_scroll, 1)
 
     # Back Button
     button_frame = QtWidgets.QWidget()
     button_layout = QtWidgets.QHBoxLayout(button_frame)
     button_layout.setContentsMargins(0, 0, 0, 0)
+    button_layout.setSpacing(6)
     self.detail_scroll_frame_layout.addWidget(button_frame)
     
     back_to_list_btn = register_component(
@@ -437,6 +643,7 @@ def _build_day_tab(self, day_frame, register_component):
     report_btn.setFont(QtGui.QFont(self.mainpage_button_font[0], self.mainpage_button_font[1]))
     report_btn.clicked.connect(lambda: _start_daily_report_generation(self, force_refresh=True))
     button_layout.addWidget(report_btn)
+    button_layout.addStretch(1)
 
     detail_stats_lf = register_component(
         "frames", "day_detail_lf",
@@ -444,6 +651,8 @@ def _build_day_tab(self, day_frame, register_component):
     )
     detail_stats_lf.setFont(QtGui.QFont(self.mainpage_button_font[0], self.mainpage_button_font[1]))
     detail_stats_layout = QtWidgets.QGridLayout(detail_stats_lf)
+    detail_stats_layout.setColumnStretch(1, 1)
+    detail_stats_layout.setColumnStretch(3, 1)
     self.detail_scroll_frame_layout.addWidget(detail_stats_lf)
 
     self.detail_val_labels = {}
@@ -455,6 +664,7 @@ def _build_day_tab(self, day_frame, register_component):
             QtWidgets.QLabel(f"{title}:")
         )
         title_lbl.setFont(QtGui.QFont("微软雅黑", 11))
+        title_lbl.setWordWrap(True)
         detail_stats_layout.addWidget(title_lbl, row, col * 2)
         lbl = register_component(
             "labels", f"day_det_v_{title}",
@@ -462,6 +672,7 @@ def _build_day_tab(self, day_frame, register_component):
         )
         lbl.setFont(QtGui.QFont("微软雅黑", 11, QtGui.QFont.Weight.Bold))
         lbl.setStyleSheet("color: #17a2b8;")
+        lbl.setWordWrap(True)
         detail_stats_layout.addWidget(lbl, row, col * 2 + 1)
         self.detail_val_labels[title] = lbl
 
@@ -476,7 +687,11 @@ def _build_day_tab(self, day_frame, register_component):
         QtWidgets.QFrame()
     )
     self.volume_chart_canvas.setStyleSheet("background: #2b2b2b;")
-    self.volume_chart_canvas.setFixedHeight(200)
+    self.volume_chart_canvas.setMinimumHeight(180)
+    self.volume_chart_canvas.setSizePolicy(
+        QtWidgets.QSizePolicy.Policy.Expanding,
+        QtWidgets.QSizePolicy.Policy.Preferred,
+    )
     self.detail_scroll_frame_layout.addWidget(self.volume_chart_canvas)
 
     report_lf = register_component(
@@ -1041,23 +1256,14 @@ def _on_single_analysis_done(self, key, result, placeholders):
     chart_path = result.get("path", "")
     if chart_path and os.path.exists(chart_path):
         try:
-            pil_img = Image.open(chart_path)
-            qt_img = ImageQt.ImageQt(pil_img)
-            pix = QtGui.QPixmap.fromImage(qt_img)
-            img_label = QtWidgets.QLabel()
-            img_label.setPixmap(pix)
-            img_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+            img_label = _create_responsive_image_label(chart_path, min_height=180)
             layout.addWidget(img_label)
-
-            menu = QtWidgets.QMenu(img_label)
-            menu.addAction("导出图片", lambda: _export_image(chart_path))
-            img_label.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
-            img_label.customContextMenuRequested.connect(lambda pos: menu.exec(img_label.mapToGlobal(pos)))
 
         except Exception as e:
             label = QtWidgets.QLabel(f"图表加载失败: {e}")
             label.setStyleSheet("color: #dc3545;")
             label.setFont(QtGui.QFont("微软雅黑", 10))
+            label.setWordWrap(True)
             layout.addWidget(label)
     else:
         label = QtWidgets.QLabel("无图表数据")
