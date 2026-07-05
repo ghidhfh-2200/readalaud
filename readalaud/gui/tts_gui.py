@@ -13,7 +13,6 @@ import shutil
 import threading
 import time
 import wave
-import pyttsx3
 from PySide6 import QtCore, QtWidgets, QtGui
 from .qt_helpers import ValueHolder, run_on_ui
 from .. import tts
@@ -138,6 +137,11 @@ def _generate_more_vloices_window(self, source):
     layout.addWidget(self.voice_listbox)
     if source == "local":
         if self.all_local_voices == None:
+            try:
+                import pyttsx3
+            except ImportError:
+                self.gui.error(message="本地 TTS 依赖 pyttsx3 未安装，无法加载本地音色。")
+                return
             self.pyttsx3_engine = pyttsx3.init()
             self.all_local_voices = self.pyttsx3_engine.getProperty("voices")
         for voice in self.all_local_voices:

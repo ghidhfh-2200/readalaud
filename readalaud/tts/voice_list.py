@@ -3,7 +3,6 @@ voice_list.py —— 获取本地 (pyttsx3) 与网络 (edge-tts) 可用音色列
 """
 import asyncio
 import threading
-import edge_tts
 
 
 def bind_tts(instance):
@@ -14,6 +13,8 @@ def bind_tts(instance):
 
 async def _get_web_voice():
     try:
+        import edge_tts
+
         return await edge_tts.list_voices()
     except Exception:
         return []

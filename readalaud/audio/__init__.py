@@ -1,20 +1,29 @@
 """
 audio 子包 —— 音频播放、数据统计与深度分析。
 
-模块说明：
-  - playback.py      : 日录音的播放/暂停/停止/进度条控制
-  - dashboard.py     : 综合数据看板（总时长、连胜、热力图、趋势图）
-  - daily_detail.py  : 单日详情数据（音量图、同比昨日）
-  - chart_builder.py : 各类图表（热力图、趋势图、音量图）生成工具
-  - analysis_engine.py : 深度音频分析（VAD/RMS/LTAS/ZCR/Pitch/SNR/MFCC/Crest/Entropy/Spectrogram）
+Heavy analysis/chart modules are imported lazily to keep application startup fast.
 """
 
-from .playback import bind_audio_analasy_api
-from .analysis_engine import (
-    run_selected_analyses,
-    ANALYSIS_ITEMS,
-    ANALYSIS_DESCRIPTIONS,
-)
+
+def bind_audio_analasy_api(*args, **kwargs):
+    from .playback import bind_audio_analasy_api as _bind_audio_analasy_api
+
+    return _bind_audio_analasy_api(*args, **kwargs)
+
+
+def run_selected_analyses(*args, **kwargs):
+    from .analysis_engine import run_selected_analyses as _run_selected_analyses
+
+    return _run_selected_analyses(*args, **kwargs)
+
+
+def __getattr__(name):
+    if name in {"ANALYSIS_ITEMS", "ANALYSIS_DESCRIPTIONS"}:
+        from . import analysis_engine
+
+        return getattr(analysis_engine, name)
+    raise AttributeError(name)
+
 
 __all__ = [
     "bind_audio_analasy_api",

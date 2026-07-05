@@ -44,12 +44,20 @@ class UiDispatcher(QtCore.QObject):
             pass
 
 
-_dispatcher_singleton = UiDispatcher()
+_dispatcher_singleton = None
+
+
+def init_ui_dispatcher():
+    """Create the UI dispatcher on the QApplication thread."""
+    global _dispatcher_singleton
+    if _dispatcher_singleton is None:
+        _dispatcher_singleton = UiDispatcher()
+    return _dispatcher_singleton
 
 
 def run_on_ui(callback):
     """Schedule a callback on the Qt UI thread."""
-    _dispatcher_singleton.dispatch.emit(callback)
+    init_ui_dispatcher().dispatch.emit(callback)
 
 
 def ensure_app():

@@ -3,6 +3,7 @@
 """
 
 from PySide6 import QtCore, QtWidgets, QtGui
+import json
 import os
 import shutil
 import time
@@ -79,7 +80,7 @@ def _generate_data_gui(self):
         setattr(self, 'if_audio_analasy_running', False),
     ])
     self.data_layout.addWidget(back_button)
-    refresh_general_dashboard(self)
+    refresh_general_dashboard(self, force_refresh=True)
 
 
 # ══════════════════════════════════════════════════════════
@@ -156,6 +157,10 @@ class _ResponsiveStatsGroup(QtWidgets.QGroupBox):
         self._record_items = []
         self._separator = None
         self._last_columns = 0
+        self.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Preferred,
+        )
 
     def set_items(self, stat_items, record_items):
         self._stat_items = stat_items
@@ -169,10 +174,14 @@ class _ResponsiveStatsGroup(QtWidgets.QGroupBox):
 
     def _column_count(self):
         width = self.contentsRect().width()
-        if width < 520:
+        if width < 420:
             return 2
-        if width < 760:
+        if width < 640:
             return 3
+        if width < 860:
+            return 4
+        if width < 1080:
+            return 5
         return 6
 
     def _reflow(self):
@@ -181,7 +190,8 @@ class _ResponsiveStatsGroup(QtWidgets.QGroupBox):
             return
 
         columns = self._column_count()
-        if columns == self._last_columns:
+        # Always reflow on first display (last_columns==0) or when column count changes
+        if columns == self._last_columns and self._last_columns != 0:
             return
         self._last_columns = columns
 
@@ -200,6 +210,11 @@ class _ResponsiveStatsGroup(QtWidgets.QGroupBox):
             col = idx % columns
             if idx and col == 0:
                 row += 2
+            # Ensure labels can grow vertically
+            title_label.setMinimumHeight(0)
+            title_label.setMaximumHeight(16777215)
+            value_label.setMinimumHeight(0)
+            value_label.setMaximumHeight(16777215)
             layout.addWidget(title_label, row, col)
             layout.addWidget(value_label, row + 1, col)
 
@@ -215,8 +230,14 @@ class _ResponsiveStatsGroup(QtWidgets.QGroupBox):
             col = idx % columns
             if idx and col == 0:
                 row += 2
+            title_label.setMinimumHeight(0)
+            title_label.setMaximumHeight(16777215)
+            value_label.setMinimumHeight(0)
+            value_label.setMaximumHeight(16777215)
             layout.addWidget(title_label, row, col)
             layout.addWidget(value_label, row + 1, col)
+
+        self.updateGeometry()
 
 
 def _pixmap_from_path(path):
@@ -266,6 +287,8 @@ def _create_responsive_image_label(path, min_height=140):
 def _load_and_display_image(path, parent_frame, width_hint=None):
     """Auxiliary to load image into a Frame"""
     _clear_direct_child_widgets(parent_frame)
+    # Ensure parent_frame has a layout
+    layout = _ensure_vbox_layout(parent_frame)
 
     if not path or not os.path.exists(path):
         label = QtWidgets.QLabel("暂无图表数据")
@@ -276,14 +299,12 @@ def _load_and_display_image(path, parent_frame, width_hint=None):
             QtWidgets.QSizePolicy.Policy.Expanding,
             QtWidgets.QSizePolicy.Policy.Preferred,
         )
-        layout = _ensure_vbox_layout(parent_frame)
         layout.addWidget(label)
         return
 
     try:
         min_height = 120 if width_hint is None else max(120, int(width_hint * 0.2))
         label = _create_responsive_image_label(path, min_height=min_height)
-        layout = _ensure_vbox_layout(parent_frame)
         layout.addWidget(label)
 
     except Exception as e:
@@ -291,7 +312,6 @@ def _load_and_display_image(path, parent_frame, width_hint=None):
         label = QtWidgets.QLabel(f"加载失败: {e}")
         label.setStyleSheet("color: red; background: #2b2b2b;")
         label.setWordWrap(True)
-        layout = _ensure_vbox_layout(parent_frame)
         layout.addWidget(label)
 
 def _export_image(src_path):
@@ -374,7 +394,7 @@ def _build_general_tab(self, general_frame, register_component):
         lbl_title.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         lbl_title.setSizePolicy(
             QtWidgets.QSizePolicy.Policy.Expanding,
-            QtWidgets.QSizePolicy.Policy.Preferred,
+            QtWidgets.QSizePolicy.Policy.MinimumExpanding,
         )
 
         lbl_val = register_component(
@@ -387,7 +407,7 @@ def _build_general_tab(self, general_frame, register_component):
         lbl_val.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         lbl_val.setSizePolicy(
             QtWidgets.QSizePolicy.Policy.Expanding,
-            QtWidgets.QSizePolicy.Policy.Preferred,
+            QtWidgets.QSizePolicy.Policy.MinimumExpanding,
         )
         self.data_labels[title] = lbl_val
         stat_items.append((lbl_title, lbl_val))
@@ -402,6 +422,10 @@ def _build_general_tab(self, general_frame, register_component):
     l_eff_t.setFont(QtGui.QFont("微软雅黑", 11))
     l_eff_t.setWordWrap(True)
     l_eff_t.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+    l_eff_t.setSizePolicy(
+        QtWidgets.QSizePolicy.Policy.Expanding,
+        QtWidgets.QSizePolicy.Policy.MinimumExpanding,
+    )
 
     lbl_eff = register_component(
         "labels", "general_rec_eff_val",
@@ -411,6 +435,10 @@ def _build_general_tab(self, general_frame, register_component):
     lbl_eff.setStyleSheet("color: #28a745;")
     lbl_eff.setWordWrap(True)
     lbl_eff.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+    lbl_eff.setSizePolicy(
+        QtWidgets.QSizePolicy.Policy.Expanding,
+        QtWidgets.QSizePolicy.Policy.MinimumExpanding,
+    )
     self.data_labels["最高效率"] = lbl_eff
 
     l_dur_t = register_component(
@@ -420,6 +448,10 @@ def _build_general_tab(self, general_frame, register_component):
     l_dur_t.setFont(QtGui.QFont("微软雅黑", 11))
     l_dur_t.setWordWrap(True)
     l_dur_t.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+    l_dur_t.setSizePolicy(
+        QtWidgets.QSizePolicy.Policy.Expanding,
+        QtWidgets.QSizePolicy.Policy.MinimumExpanding,
+    )
 
     lbl_dur = register_component(
         "labels", "general_rec_dur_val",
@@ -429,6 +461,10 @@ def _build_general_tab(self, general_frame, register_component):
     lbl_dur.setStyleSheet("color: #dc3545;")
     lbl_dur.setWordWrap(True)
     lbl_dur.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+    lbl_dur.setSizePolicy(
+        QtWidgets.QSizePolicy.Policy.Expanding,
+        QtWidgets.QSizePolicy.Policy.MinimumExpanding,
+    )
     self.data_labels["最长时长"] = lbl_dur
     basic_data_lf.set_items(stat_items, [(l_eff_t, lbl_eff), (l_dur_t, lbl_dur)])
 
@@ -692,6 +728,7 @@ def _build_day_tab(self, day_frame, register_component):
         QtWidgets.QSizePolicy.Policy.Expanding,
         QtWidgets.QSizePolicy.Policy.Preferred,
     )
+    _ensure_vbox_layout(self.volume_chart_canvas)
     self.detail_scroll_frame_layout.addWidget(self.volume_chart_canvas)
 
     report_lf = register_component(
@@ -797,6 +834,15 @@ def _build_day_tab(self, day_frame, register_component):
         setattr(self, 'if_audio_analasy_running', False)
     ])
     _ab_layout.addWidget(back_btn)
+
+    refresh_analysis_btn = register_component(
+        "buttons", "analysis_refresh",
+        QtWidgets.QPushButton("⟳ 刷新分析")
+    )
+    refresh_analysis_btn.setFont(QtGui.QFont(self.mainpage_button_font[0], self.mainpage_button_font[1]))
+    refresh_analysis_btn.clicked.connect(lambda: _refresh_audio_analysis(self))
+    _ab_layout.addWidget(refresh_analysis_btn)
+    _ab_layout.addStretch(1)
     self._analysis_scroll_content_layout.addWidget(_ab_frame)
 
     self._analysis_results_frame = QtWidgets.QWidget()
@@ -934,17 +980,7 @@ def _build_day_tab(self, day_frame, register_component):
             
              # Chart
             vol_chart_path = detail_data.get('volume_chart_path', '')
-            for child in self.volume_chart_canvas.findChildren(QtWidgets.QWidget):
-                if child.parent() == self.volume_chart_canvas:
-                    child.deleteLater()
-            if vol_chart_path and os.path.exists(vol_chart_path):
-                _load_and_display_image(vol_chart_path, self.volume_chart_canvas)
-            else:
-                label = QtWidgets.QLabel("暂无音量数据")
-                label.setStyleSheet("color: #888888;")
-                label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-                layout = self.volume_chart_canvas.layout() or QtWidgets.QVBoxLayout(self.volume_chart_canvas)
-                layout.addWidget(label)
+            _load_and_display_image(vol_chart_path, self.volume_chart_canvas) if vol_chart_path and os.path.exists(vol_chart_path) else _load_and_display_image(None, self.volume_chart_canvas)
 
             _reset_daily_report_view("点击「生成朗读报告」后，自动汇总当前日期的数据并评分。")
 
@@ -1052,6 +1088,16 @@ def _build_day_tab(self, day_frame, register_component):
     self.day_tree.itemDoubleClicked.connect(lambda _item: on_day_double_click(None))
 
 
+def _refresh_audio_analysis(self):
+    """刷新音频分析：强制重新生成所有图表。"""
+    selected_keys = getattr(self, "_audio_analysis_selected_keys", None)
+    if not selected_keys:
+        return
+    if getattr(self, "if_audio_analysis_running", False):
+        return
+    _start_audio_analysis(self, selected_keys, force_refresh=True)
+
+
 # ══════════════════════════════════════════════════════════
 #  每日数据 – 音频分析弹窗 & 异步绘制
 # ══════════════════════════════════════════════════════════
@@ -1150,17 +1196,30 @@ def _show_analysis_dialog(self):
     layout.addWidget(btn_frame)
 
 
-def _start_audio_analysis(self, selected_keys):
-    """切换到分析结果 Frame 并启动后台线程异步绘图。"""
+def _start_audio_analysis(self, selected_keys, force_refresh=False):
+    """切换到分析结果 Frame，优先使用缓存，force_refresh=True 时重新生成。"""
     st = getattr(self, "_day_audio_state", {})
     audio_path = st.get("path", "")
     date_str = getattr(self, "current_view_date", "")
+
+    # 保存当前选中的分析项，供刷新按钮使用
+    self._audio_analysis_selected_keys = list(selected_keys)
 
     # 切换视图: 详情 → 分析
     self.day_detail_container.hide()
     self.day_analysis_container.show()
 
-    # 清除上次分析结果
+    # 清除上次分析结果（保留返回按钮那一行）
+    back_btn_frame = None
+    for i in range(self._analysis_scroll_content_layout.count()):
+        item = self._analysis_scroll_content_layout.itemAt(i)
+        if item and item.widget():
+            w = item.widget()
+            # 第一个 widget 是返回按钮那行，保留它
+            if back_btn_frame is None:
+                back_btn_frame = w
+                continue
+    # 清除分析结果 frame 内的所有子控件
     for w in self._analysis_results_frame.findChildren(QtWidgets.QWidget):
         if w.parent() == self._analysis_results_frame:
             w.deleteLater()
@@ -1175,6 +1234,37 @@ def _start_audio_analysis(self, selected_keys):
     # 停止播放
     audio_analasy.stop_day_audio(self, reset=True)
 
+    account = getattr(self, "current_acount", "")
+    output_dir = os.path.join("./details", account, str(date_str))
+
+    # ── 缓存检查：如果所有图表文件都存在且未强制刷新，直接加载缓存 ──
+    if not force_refresh:
+        cache_file = os.path.join(output_dir, "audio_analysis_cache.json")
+        all_cached = True
+        cached_results = {}
+        if os.path.exists(cache_file):
+            try:
+                with open(cache_file, "r", encoding="utf-8") as f:
+                    cached_results = json.load(f)
+            except Exception:
+                cached_results = {}
+
+        for key in selected_keys:
+            chart_path = os.path.join(output_dir, f"analysis_{key}.png")
+            cached_entry = cached_results.get(key, {})
+            if os.path.exists(chart_path) and cached_entry:
+                # cache 有效，直接用
+                pass
+            else:
+                all_cached = False
+                break
+
+        if all_cached and cached_results:
+            # 全部命中缓存，直接渲染
+            _build_analysis_results_from_cache(self, selected_keys, cached_results, output_dir)
+            return
+
+    # ── 需要重新生成 ──
     # 创建加载占位
     placeholders = {}
     for key in selected_keys:
@@ -1202,9 +1292,6 @@ def _start_audio_analysis(self, selected_keys):
         placeholders[key] = lf
 
     # 异步后台分析
-    account = getattr(self, "current_acount", "")
-    output_dir = os.path.join("./details", account, str(date_str))
-
     def _bg_worker():
         if getattr(self, "if_audio_analysis_running", False) == True:
             return
@@ -1215,11 +1302,138 @@ def _start_audio_analysis(self, selected_keys):
         def _on_done(key, result):
             run_on_ui(lambda k=key, r=result: _on_single_analysis_done(self, k, r, placeholders))
 
-        audio_analasy.run_selected_analyses(
+        results = audio_analasy.run_selected_analyses(
             audio_path, selected_keys, output_dir, on_item_done=_on_done
         )
+        # 保存缓存
+        cache_data = {}
+        for k, v in results.items():
+            cache_data[k] = {
+                "title": v.get("title", ""),
+                "path": v.get("path", ""),
+                "extra": v.get("extra", {}),
+                "error": v.get("error", ""),
+            }
+        try:
+            cache_file = os.path.join(output_dir, "audio_analysis_cache.json")
+            with open(cache_file, "w", encoding="utf-8") as f:
+                json.dump(cache_data, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
 
     threading.Thread(target=_bg_worker, daemon=True).start()
+
+
+def _build_analysis_results_from_cache(self, selected_keys, cached_results, output_dir):
+    """从缓存直接构建音频分析结果界面（不重新计算）。"""
+    for key in selected_keys:
+        cached = cached_results.get(key, {})
+        chart_path = cached.get("path", os.path.join(output_dir, f"analysis_{key}.png"))
+        extra = cached.get("extra", {})
+        error = cached.get("error", "")
+
+        desc = audio_analasy.ANALYSIS_DESCRIPTIONS.get(key, {})
+        title = audio_analasy.ANALYSIS_ITEMS.get(key, key)
+        brief = desc.get("brief", "")
+
+        lf = QtWidgets.QGroupBox(title)
+        lf.setFont(QtGui.QFont("微软雅黑", 11, QtGui.QFont.Weight.Bold))
+        lf_layout = QtWidgets.QVBoxLayout(lf)
+        self._analysis_results_frame.layout().addWidget(lf)
+
+        if brief:
+            brief_label = QtWidgets.QLabel(brief)
+            brief_label.setStyleSheet("color: #6c757d;")
+            brief_label.setFont(QtGui.QFont("微软雅黑", 9))
+            brief_label.setWordWrap(True)
+            lf_layout.addWidget(brief_label)
+
+        if error:
+            err = QtWidgets.QLabel(f"❌ 分析失败: {error}")
+            err.setStyleSheet("color: #dc3545;")
+            err.setFont(QtGui.QFont("微软雅黑", 10))
+            lf_layout.addWidget(err)
+            continue
+
+        # 加载缓存图表
+        if chart_path and os.path.exists(chart_path):
+            try:
+                img_label = _create_responsive_image_label(chart_path, min_height=180)
+                lf_layout.addWidget(img_label)
+            except Exception as e:
+                label = QtWidgets.QLabel(f"图表加载失败: {e}")
+                label.setStyleSheet("color: #dc3545;")
+                label.setFont(QtGui.QFont("微软雅黑", 10))
+                label.setWordWrap(True)
+                lf_layout.addWidget(label)
+        else:
+            label = QtWidgets.QLabel("无图表数据")
+            label.setStyleSheet("color: gray;")
+            label.setFont(QtGui.QFont("微软雅黑", 10))
+            lf_layout.addWidget(label)
+
+        # ── 指标数值区域 ──
+        extra_tips = desc.get("extra_tips", {})
+        detail_text = desc.get("detail", "")
+
+        if extra:
+            metrics_frame = QtWidgets.QWidget()
+            metrics_layout = QtWidgets.QHBoxLayout(metrics_frame)
+            metrics_layout.setContentsMargins(0, 0, 0, 0)
+            lf_layout.addWidget(metrics_frame)
+            for k, v in extra.items():
+                tip = extra_tips.get(k, "")
+                val_lf = QtWidgets.QFrame()
+                val_lf.setFrameShape(QtWidgets.QFrame.Shape.Panel)
+                val_layout = QtWidgets.QVBoxLayout(val_lf)
+                label_key = QtWidgets.QLabel(k)
+                label_key.setStyleSheet("color: #6c757d;")
+                label_key.setFont(QtGui.QFont("微软雅黑", 8))
+                label_val = QtWidgets.QLabel(str(v))
+                label_val.setStyleSheet("color: #17a2b8;")
+                label_val.setFont(QtGui.QFont("微软雅黑", 11, QtGui.QFont.Weight.Bold))
+                val_layout.addWidget(label_key)
+                val_layout.addWidget(label_val)
+                if tip:
+                    tip_lbl = QtWidgets.QLabel(tip)
+                    tip_lbl.setStyleSheet("color: #adb5bd;")
+                    tip_lbl.setFont(QtGui.QFont("微软雅黑", 8))
+                    tip_lbl.setWordWrap(True)
+                    val_layout.addWidget(tip_lbl)
+                metrics_layout.addWidget(val_lf)
+
+        # ── 可展开的详细说明 ──
+        if detail_text:
+            detail_visible = ValueHolder(False)
+            detail_content = QtWidgets.QFrame()
+            detail_content.setStyleSheet("background: #f8f9fa;")
+            detail_layout = QtWidgets.QVBoxLayout(detail_content)
+            detail_label = QtWidgets.QLabel(detail_text)
+            detail_label.setStyleSheet("color: #495057;")
+            detail_label.setFont(QtGui.QFont("微软雅黑", 9))
+            detail_label.setWordWrap(True)
+            detail_layout.addWidget(detail_label)
+
+            toggle_btn = QtWidgets.QPushButton("📖 查看指标说明 ▼")
+            toggle_btn.setFont(QtGui.QFont("微软雅黑", 9))
+            toggle_btn.setStyleSheet("color: #007bff;")
+            lf_layout.addWidget(toggle_btn)
+
+            def _make_toggle(dc, tb, dv):
+                def _toggle_detail():
+                    if dv.get():
+                        dc.hide()
+                        tb.setText("📖 查看指标说明 ▼")
+                        dv.set(False)
+                    else:
+                        dc.show()
+                        tb.setText("📖 收起说明 ▲")
+                        dv.set(True)
+                return _toggle_detail
+
+            toggle_btn.clicked.connect(_make_toggle(detail_content, toggle_btn, detail_visible))
+            detail_content.hide()
+            lf_layout.addWidget(detail_content)
 
 
 def _on_single_analysis_done(self, key, result, placeholders):
@@ -1386,9 +1600,18 @@ def refresh_general_dashboard(self, force_refresh=False):
             # Fetch fresh analysis data
             dashboard_data = audio_analasy.refresh_dashboard_data(self, force_refresh=force_refresh)
             
-            # Schedule UI update
-            if hasattr(self, "data_frame"):
-                run_on_ui(lambda payload=dashboard_data: _update_dashboard_ui(self, payload))
+            # Schedule UI update — only if the data page is still shown
+            def _safe_update():
+                if not getattr(self, "if_data_form_show", False):
+                    return
+                if not hasattr(self, "data_labels"):
+                    return
+                try:
+                    _update_dashboard_ui(self, dashboard_data)
+                except RuntimeError:
+                    pass
+
+            run_on_ui(_safe_update)
         except Exception as e:
             print(f"Error refreshing dashboard: {e}")
             traceback.print_exc()
@@ -1396,26 +1619,41 @@ def refresh_general_dashboard(self, force_refresh=False):
     threading.Thread(target=_worker, daemon=True).start()
 
 def _update_dashboard_ui(self, dashboard_data):
+    # 安全检查：页面已关闭则跳过
+    if not getattr(self, "if_data_form_show", False):
+        return
+    if not hasattr(self, "data_labels"):
+        return
+    if not isinstance(dashboard_data, dict):
+        return
+
     try:
+        # 安全更新 label 的辅助函数
+        def _safe_set(label_dict, key, value):
+            widget = label_dict.get(key)
+            if widget is None:
+                return
+            try:
+                widget.setText(str(value))
+            except RuntimeError:
+                pass
+
         # --- Update Basic Stats in General Tab ---
-        if isinstance(dashboard_data, dict):
-            self.data_labels["朗读总天数"].setText(str(dashboard_data.get('total_days', '--')))
-            self.data_labels["朗读总时长（秒）"].setText(f"{dashboard_data.get('total', 0):.2f}")
-            self.data_labels["平均朗读时长"].setText(f"{dashboard_data.get('average_daily', 0):.2f}")
-            self.data_labels["当前连续朗读天数"].setText(str(dashboard_data.get('current_streak', '--')))
-            self.data_labels["历史最长天数"].setText(str(dashboard_data.get('max_streak', '--')))
-            self.data_labels["平均效率"].setText(str(dashboard_data.get('average_efficiency', '--')))
-        else:
-            print("Error: dashboard_data is not a dictionary.")
+        _safe_set(self.data_labels, "朗读总天数", dashboard_data.get('total_days', '--'))
+        _safe_set(self.data_labels, "朗读总时长（秒）", f"{dashboard_data.get('total', 0):.2f}")
+        _safe_set(self.data_labels, "平均朗读时长", f"{dashboard_data.get('average_daily', 0):.2f}")
+        _safe_set(self.data_labels, "当前连续朗读天数", dashboard_data.get('current_streak', '--'))
+        _safe_set(self.data_labels, "历史最长天数", dashboard_data.get('max_streak', '--'))
+        _safe_set(self.data_labels, "平均效率", dashboard_data.get('average_efficiency', '--'))
 
         # Update Records
         eff_date = dashboard_data.get('max_efficiency_date', '----/--/--')
         eff_val = dashboard_data.get('max_efficiency_val', 0.0)
-        self.data_labels["最高效率"].setText(f"{eff_val:.0%} ({eff_date})")
+        _safe_set(self.data_labels, "最高效率", f"{eff_val:.0%} ({eff_date})")
 
         dur_date = dashboard_data.get('max_duration_date', '----/--/--')
         dur_val = dashboard_data.get('max_duration_val', 0.0)
-        self.data_labels["最长时长"].setText(f"{dur_val:.0f}s ({dur_date})")
+        _safe_set(self.data_labels, "最长时长", f"{dur_val:.0f}s ({dur_date})")
 
         # --- Update Charts (Heatmap & Trend) ---
         heatmap_paths_raw = dashboard_data.get('heatmap_paths', {})
