@@ -17,6 +17,18 @@ def run_selected_analyses(*args, **kwargs):
     return _run_selected_analyses(*args, **kwargs)
 
 
+def generate_llm_report(*args, **kwargs):
+    from .llm_report import generate_llm_report as _generate_llm_report
+
+    return _generate_llm_report(*args, **kwargs)
+
+
+def get_llm_config(*args, **kwargs):
+    from .llm_report import get_llm_config as _get_llm_config
+
+    return _get_llm_config(*args, **kwargs)
+
+
 def __getattr__(name):
     if name in {"ANALYSIS_ITEMS", "ANALYSIS_DESCRIPTIONS"}:
         from . import analysis_engine
@@ -30,4 +42,6 @@ __all__ = [
     "run_selected_analyses",
     "ANALYSIS_ITEMS",
     "ANALYSIS_DESCRIPTIONS",
+    "generate_llm_report",
+    "get_llm_config",
 ]

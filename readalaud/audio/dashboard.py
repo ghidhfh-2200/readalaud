@@ -83,6 +83,7 @@ def refresh_dashboard_data(self, force_refresh=False):
     """
     综合数据看板刷新接口。
     具备缓存节流（120s），计算总时长/天数/均值/连胜并生成图表。
+    注意：热力图/趋势图生成可能较慢（matplotlib），在 force_refresh 时走完整流程。
     """
     account = getattr(self, "current_acount", None)
     if not account:
@@ -95,6 +96,7 @@ def refresh_dashboard_data(self, force_refresh=False):
 
     current_ts = time.time()
 
+    # ── 快速检查缓存 ──
     if not force_refresh and os.path.exists(general_path):
         try:
             with open(general_path, "r") as f:
@@ -112,6 +114,7 @@ def refresh_dashboard_data(self, force_refresh=False):
     if not os.path.exists(base_url):
         return {}
 
+    # ── 遍历数据文件 ──
     total_time = 0
     total_efficiency_acc = 0.0
     valid_dates = []
@@ -134,7 +137,6 @@ def refresh_dashboard_data(self, force_refresh=False):
                     day_data = json.load(f)
                 duration = int(day_data.get("total", 0))
                 efficiency = float(day_data.get("efficiency", 0))
-                pause_time = int(day_data.get("stop_total", 0))
                 if duration > 0:
                     total_time += duration
                     total_efficiency_acc += efficiency
@@ -154,6 +156,7 @@ def refresh_dashboard_data(self, force_refresh=False):
     average_efficiency = total_efficiency_acc / total_days if total_days > 0 else 0.0
     current_streak, max_streak = calculate_streaks(valid_dates)
 
+    # ── 生成图表（可能较慢） ──
     plot_df = pd.DataFrame(plot_data_list) if plot_data_list else pd.DataFrame(columns=["date", "duration", "efficiency"])
     heatmap_results = save_heatmap(plot_df, details_dir)
     save_trend_chart(plot_df, trend_path)

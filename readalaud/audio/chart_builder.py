@@ -13,7 +13,9 @@ matplotlib.use("Agg")
 
 
 def save_heatmap(df, save_dir):
-    """为每个有数据的年份（含当前年）生成独立热力图，返回 {year: path} 字典。"""
+    """为每个有数据的年份（含当前年）生成独立热力图，返回 {year: path} 字典。
+    如果对应年份的图片已存在则跳过生成（缓存优化）。
+    """
     from datetime import datetime
     if df is None or df.empty:
         return {}
@@ -34,19 +36,29 @@ def save_heatmap(df, save_dir):
     heatmap_paths = {}
     for year in years:
         save_path = os.path.join(save_dir, f"heatmap_{year}.png")
+        # 如果图片已存在，跳过生成（热力图生成是主要耗时点）
+        if os.path.exists(save_path):
+            heatmap_paths[year] = save_path
+            continue
+
         full_year_idx = pd.date_range(start=f"{year}-01-01", end=f"{year}-12-31", freq="D")
         year_data = data.reindex(full_year_idx, fill_value=0)
         year_data.index.name = "date"
 
-        fig = plt.figure(figsize=(10, 3), dpi=100)
-        ax = fig.add_subplot(111)
-        calmap.yearplot(year_data, year=year, ax=ax, cmap="YlGn",
-                        linewidth=1, fillcolor="#dddddd", linecolor="#ffffff")
-        ax.set_title(f"{year}年 朗读热力图 (颜色深浅表示时长)",
-                     fontproperties="Microsoft YaHei", fontsize=10)
-        plt.tight_layout()
-        fig.savefig(save_path, bbox_inches="tight", dpi=100)
-        plt.close(fig)
+        try:
+            fig = plt.figure(figsize=(10, 3), dpi=100)
+            ax = fig.add_subplot(111)
+            calmap.yearplot(year_data, year=year, ax=ax, cmap="YlGn",
+                            linewidth=1, fillcolor="#dddddd", linecolor="#ffffff")
+            ax.set_title(f"{year}年 朗读热力图 (颜色深浅表示时长)",
+                         fontproperties="Microsoft YaHei", fontsize=10)
+            plt.tight_layout()
+            fig.savefig(save_path, bbox_inches="tight", dpi=100)
+            plt.close(fig)
+        except Exception as e:
+            print(f"Error generating heatmap for {year}: {e}")
+            plt.close("all")
+            continue
         heatmap_paths[year] = save_path
     return heatmap_paths
 

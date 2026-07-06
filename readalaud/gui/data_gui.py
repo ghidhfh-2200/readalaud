@@ -3,7 +3,6 @@
 """
 
 from PySide6 import QtCore, QtWidgets, QtGui
-import json
 import os
 import shutil
 import time
@@ -16,6 +15,9 @@ from .. import audio_analysis as audio_analasy
 from .gui_service import get_gui_service
 from .qt_helpers import ValueHolder
 from .qt_helpers import run_on_ui
+
+# 线程安全锁：保护音频分析状态
+_analysis_lock = threading.Lock()
 
 
 # ══════════════════════════════════════════════════════════
@@ -80,7 +82,8 @@ def _generate_data_gui(self):
         setattr(self, 'if_audio_analasy_running', False),
     ])
     self.data_layout.addWidget(back_button)
-    refresh_general_dashboard(self, force_refresh=True)
+    # 优先使用缓存快速展示，后台再静默刷新
+    refresh_general_dashboard(self, force_refresh=False)
 
 
 # ══════════════════════════════════════════════════════════
@@ -834,15 +837,6 @@ def _build_day_tab(self, day_frame, register_component):
         setattr(self, 'if_audio_analasy_running', False)
     ])
     _ab_layout.addWidget(back_btn)
-
-    refresh_analysis_btn = register_component(
-        "buttons", "analysis_refresh",
-        QtWidgets.QPushButton("⟳ 刷新分析")
-    )
-    refresh_analysis_btn.setFont(QtGui.QFont(self.mainpage_button_font[0], self.mainpage_button_font[1]))
-    refresh_analysis_btn.clicked.connect(lambda: _refresh_audio_analysis(self))
-    _ab_layout.addWidget(refresh_analysis_btn)
-    _ab_layout.addStretch(1)
     self._analysis_scroll_content_layout.addWidget(_ab_frame)
 
     self._analysis_results_frame = QtWidgets.QWidget()
@@ -919,7 +913,7 @@ def _build_day_tab(self, day_frame, register_component):
         self.report_text = QtWidgets.QTextEdit()
         self.report_text.setFont(QtGui.QFont("微软雅黑", 10))
         self.report_text.setReadOnly(True)
-        self.report_text.setText("点击「生成朗读报告」后显示评分结果。")
+        self.report_text.setText("点击「生成朗读报告」后显示 AI 评估结果。")
         root_layout.addWidget(self.report_text)
 
         return win
@@ -1022,6 +1016,44 @@ def _build_day_tab(self, day_frame, register_component):
         except Exception as e:
             print(f"Error updating report UI: {e}")
 
+    def _update_llm_report_view(llm_data):
+        """用 AI 报告内容更新弹窗（Markdown 渲染 + 评分/维度更新）。"""
+        try:
+            report_md = llm_data.get("report_text", "")
+            error = llm_data.get("error")
+            if error:
+                self.report_text.setPlainText(f"## ❌ AI 报告生成失败\n\n{error}")
+                return
+            if not report_md:
+                self.report_text.setPlainText("AI 报告内容为空。")
+                return
+
+            # PySide6 / Qt 5.14+ 支持 setMarkdown
+            if hasattr(self.report_text, "setMarkdown"):
+                self.report_text.setMarkdown(report_md)
+            else:
+                self.report_text.setPlainText(report_md)
+
+            # 如果 AI 报告包含评分，更新顶部分数显示
+            llm_response = llm_data.get("llm_response")
+            if llm_response and isinstance(llm_response, dict):
+                ai_score = llm_response.get("评分", {})
+                ai_overall = ai_score.get("综合评分")
+                ai_grade = ai_score.get("等级")
+                if ai_overall is not None:
+                    self.report_score_label.setText(f"{ai_overall}")
+                    self.report_score_label.setStyleSheet("color: #6f42c1;")
+                if ai_grade:
+                    self.report_grade_label.setText(ai_grade)
+                    self.report_grade_label.setStyleSheet("color: #6f42c1;")
+                for dim_name in ["流畅度", "音质清晰度", "音量控制", "表现力", "坚持力"]:
+                    dim_val = ai_score.get(dim_name)
+                    if dim_val is not None and dim_name in self.report_dimension_labels:
+                        self.report_dimension_labels[dim_name].setText(str(dim_val))
+                        self.report_dimension_labels[dim_name].setStyleSheet("color: #6f42c1;")
+        except Exception as e:
+            print(f"Error updating LLM report UI: {e}")
+
     def _start_daily_report_generation(_, force_refresh=False):
         target_date = getattr(self, 'current_view_date', None)
         win = _ensure_daily_report_window()
@@ -1035,25 +1067,64 @@ def _build_day_tab(self, day_frame, register_component):
             _reset_daily_report_view("请先在每日列表中打开某一天的详情页。")
             return
 
-        _reset_daily_report_view("正在生成朗读报告，请稍候...")
+        account = getattr(self, "current_acount", "")
+        date_str = target_date.strftime("%Y-%m-%d") if hasattr(target_date, "strftime") else str(target_date)
 
-        def _worker():
+        _reset_daily_report_view("正在生成 AI 朗读报告，请稍候...")
+        self.report_text.setPlainText("⏳ 正在收集数据并调用 AI 模型...")
+
+        # 直接启动 LLM 报告（内部自行收集原始数据）
+        _start_llm_report_generation(account, date_str, force_refresh)
+
+    def _start_llm_report_generation(account, date_str, force_refresh):
+        """在后台线程中调用 LLM 生成 AI 评估报告（LLM 模块自行收集原始数据）。"""
+        try:
+            from ..audio.llm_report import get_llm_config
+            cfg = get_llm_config()
+            if not cfg.get("llm_enabled", True):
+                self.report_text.setPlainText("## ℹ️ AI 报告未启用\n\n请在「设置 → AI 报告」中启用并配置 API 接口。")
+                return
+            if not cfg.get("llm_api_key") or not cfg.get("llm_base_url") or not cfg.get("llm_model"):
+                self.report_text.setPlainText("## ⚙️ AI 报告未配置\n\n请在「设置 → AI 报告」中填写 API Key、Base URL 和模型名称。")
+                return
+        except Exception:
+            self.report_text.setPlainText("## ⚠️ 无法加载 LLM 模块\n\n请确认已安装 openai 库：`pip install openai`")
+            return
+
+        def _llm_progress(msg):
+            # on_progress 在后台线程被调用，必须通过 run_on_ui 调度到主线程
+            def _update():
+                try:
+                    self.report_text.setPlainText(msg)
+                except Exception:
+                    pass
+            run_on_ui(_update)
+
+        run_on_ui(lambda: _llm_progress("⏳ 正在调用 AI 模型分析朗读数据...\n\n这可能需要 10-30 秒，请耐心等待。"))
+
+        def _llm_worker():
             try:
-                report_data = audio_analasy.generate_reading_report(self, target_date, force_refresh=force_refresh)
+                from ..audio.llm_report import generate_llm_report
+                llm_data = generate_llm_report(
+                    account=account,
+                    date_str=date_str,
+                    force_refresh=force_refresh,
+                    on_progress=_llm_progress,
+                )
             except Exception as e:
-                report_data = {}
-                print(f"Error generating report: {e}")
+                llm_data = {"error": str(e), "report_text": ""}
+                print(f"Error generating LLM report: {e}")
+                traceback.print_exc()
 
-            def _finish():
-                if hasattr(self, "report_text"):
-                    _update_daily_report_view(report_data)
+            def _llm_finish():
+                _update_llm_report_view(llm_data)
 
             try:
-                run_on_ui(_finish)
+                run_on_ui(_llm_finish)
             except Exception:
                 pass
 
-        threading.Thread(target=_worker, daemon=True).start()
+        threading.Thread(target=_llm_worker, daemon=True).start()
 
     def on_day_double_click(_):
         """
@@ -1086,16 +1157,6 @@ def _build_day_tab(self, day_frame, register_component):
             print(f"Error handling double click: {e}")
 
     self.day_tree.itemDoubleClicked.connect(lambda _item: on_day_double_click(None))
-
-
-def _refresh_audio_analysis(self):
-    """刷新音频分析：强制重新生成所有图表。"""
-    selected_keys = getattr(self, "_audio_analysis_selected_keys", None)
-    if not selected_keys:
-        return
-    if getattr(self, "if_audio_analysis_running", False):
-        return
-    _start_audio_analysis(self, selected_keys, force_refresh=True)
 
 
 # ══════════════════════════════════════════════════════════
@@ -1196,30 +1257,17 @@ def _show_analysis_dialog(self):
     layout.addWidget(btn_frame)
 
 
-def _start_audio_analysis(self, selected_keys, force_refresh=False):
-    """切换到分析结果 Frame，优先使用缓存，force_refresh=True 时重新生成。"""
+def _start_audio_analysis(self, selected_keys):
+    """切换到分析结果 Frame 并启动后台线程异步绘图。"""
     st = getattr(self, "_day_audio_state", {})
     audio_path = st.get("path", "")
     date_str = getattr(self, "current_view_date", "")
-
-    # 保存当前选中的分析项，供刷新按钮使用
-    self._audio_analysis_selected_keys = list(selected_keys)
 
     # 切换视图: 详情 → 分析
     self.day_detail_container.hide()
     self.day_analysis_container.show()
 
-    # 清除上次分析结果（保留返回按钮那一行）
-    back_btn_frame = None
-    for i in range(self._analysis_scroll_content_layout.count()):
-        item = self._analysis_scroll_content_layout.itemAt(i)
-        if item and item.widget():
-            w = item.widget()
-            # 第一个 widget 是返回按钮那行，保留它
-            if back_btn_frame is None:
-                back_btn_frame = w
-                continue
-    # 清除分析结果 frame 内的所有子控件
+    # 清除上次分析结果
     for w in self._analysis_results_frame.findChildren(QtWidgets.QWidget):
         if w.parent() == self._analysis_results_frame:
             w.deleteLater()
@@ -1234,37 +1282,6 @@ def _start_audio_analysis(self, selected_keys, force_refresh=False):
     # 停止播放
     audio_analasy.stop_day_audio(self, reset=True)
 
-    account = getattr(self, "current_acount", "")
-    output_dir = os.path.join("./details", account, str(date_str))
-
-    # ── 缓存检查：如果所有图表文件都存在且未强制刷新，直接加载缓存 ──
-    if not force_refresh:
-        cache_file = os.path.join(output_dir, "audio_analysis_cache.json")
-        all_cached = True
-        cached_results = {}
-        if os.path.exists(cache_file):
-            try:
-                with open(cache_file, "r", encoding="utf-8") as f:
-                    cached_results = json.load(f)
-            except Exception:
-                cached_results = {}
-
-        for key in selected_keys:
-            chart_path = os.path.join(output_dir, f"analysis_{key}.png")
-            cached_entry = cached_results.get(key, {})
-            if os.path.exists(chart_path) and cached_entry:
-                # cache 有效，直接用
-                pass
-            else:
-                all_cached = False
-                break
-
-        if all_cached and cached_results:
-            # 全部命中缓存，直接渲染
-            _build_analysis_results_from_cache(self, selected_keys, cached_results, output_dir)
-            return
-
-    # ── 需要重新生成 ──
     # 创建加载占位
     placeholders = {}
     for key in selected_keys:
@@ -1291,149 +1308,38 @@ def _start_audio_analysis(self, selected_keys, force_refresh=False):
         lf_layout.addWidget(loading)
         placeholders[key] = lf
 
-    # 异步后台分析
+    # 异步后台分析（线程安全）
+    account = getattr(self, "current_acount", "")
+    output_dir = os.path.join("./details", account, str(date_str))
+
+    # 使用 QMutex 保护并发，防止重复启动
+    _analysis_mutex = getattr(self, "_analysis_mutex", None)
+    if _analysis_mutex is None:
+        self._analysis_mutex = QtCore.QMutex()
+        _analysis_mutex = self._analysis_mutex
+
     def _bg_worker():
-        if getattr(self, "if_audio_analysis_running", False) == True:
+        # 尝试获取锁，如果已在运行则直接返回
+        if not _analysis_mutex.tryLock():
             return
-        self.if_audio_analysis_running = True
-        self.if_audio_analasy_running = True
-        time.sleep(0.2)  # 等待 GUI 渲染完成
-
-        def _on_done(key, result):
-            run_on_ui(lambda k=key, r=result: _on_single_analysis_done(self, k, r, placeholders))
-
-        results = audio_analasy.run_selected_analyses(
-            audio_path, selected_keys, output_dir, on_item_done=_on_done
-        )
-        # 保存缓存
-        cache_data = {}
-        for k, v in results.items():
-            cache_data[k] = {
-                "title": v.get("title", ""),
-                "path": v.get("path", ""),
-                "extra": v.get("extra", {}),
-                "error": v.get("error", ""),
-            }
         try:
-            cache_file = os.path.join(output_dir, "audio_analysis_cache.json")
-            with open(cache_file, "w", encoding="utf-8") as f:
-                json.dump(cache_data, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
+            # 首次更新 UI 状态（切到主线程）
+            def _mark_started():
+                self.if_audio_analysis_running = True
+                self.if_audio_analasy_running = True
+            run_on_ui(_mark_started)
+
+            def _on_done(key, result):
+                # 回调在后台线程触发，通过 run_on_ui 安全调度到主线程
+                run_on_ui(lambda k=key, r=result: _on_single_analysis_done(self, k, r, placeholders))
+
+            audio_analasy.run_selected_analyses(
+                audio_path, selected_keys, output_dir, on_item_done=_on_done
+            )
+        finally:
+            _analysis_mutex.unlock()
 
     threading.Thread(target=_bg_worker, daemon=True).start()
-
-
-def _build_analysis_results_from_cache(self, selected_keys, cached_results, output_dir):
-    """从缓存直接构建音频分析结果界面（不重新计算）。"""
-    for key in selected_keys:
-        cached = cached_results.get(key, {})
-        chart_path = cached.get("path", os.path.join(output_dir, f"analysis_{key}.png"))
-        extra = cached.get("extra", {})
-        error = cached.get("error", "")
-
-        desc = audio_analasy.ANALYSIS_DESCRIPTIONS.get(key, {})
-        title = audio_analasy.ANALYSIS_ITEMS.get(key, key)
-        brief = desc.get("brief", "")
-
-        lf = QtWidgets.QGroupBox(title)
-        lf.setFont(QtGui.QFont("微软雅黑", 11, QtGui.QFont.Weight.Bold))
-        lf_layout = QtWidgets.QVBoxLayout(lf)
-        self._analysis_results_frame.layout().addWidget(lf)
-
-        if brief:
-            brief_label = QtWidgets.QLabel(brief)
-            brief_label.setStyleSheet("color: #6c757d;")
-            brief_label.setFont(QtGui.QFont("微软雅黑", 9))
-            brief_label.setWordWrap(True)
-            lf_layout.addWidget(brief_label)
-
-        if error:
-            err = QtWidgets.QLabel(f"❌ 分析失败: {error}")
-            err.setStyleSheet("color: #dc3545;")
-            err.setFont(QtGui.QFont("微软雅黑", 10))
-            lf_layout.addWidget(err)
-            continue
-
-        # 加载缓存图表
-        if chart_path and os.path.exists(chart_path):
-            try:
-                img_label = _create_responsive_image_label(chart_path, min_height=180)
-                lf_layout.addWidget(img_label)
-            except Exception as e:
-                label = QtWidgets.QLabel(f"图表加载失败: {e}")
-                label.setStyleSheet("color: #dc3545;")
-                label.setFont(QtGui.QFont("微软雅黑", 10))
-                label.setWordWrap(True)
-                lf_layout.addWidget(label)
-        else:
-            label = QtWidgets.QLabel("无图表数据")
-            label.setStyleSheet("color: gray;")
-            label.setFont(QtGui.QFont("微软雅黑", 10))
-            lf_layout.addWidget(label)
-
-        # ── 指标数值区域 ──
-        extra_tips = desc.get("extra_tips", {})
-        detail_text = desc.get("detail", "")
-
-        if extra:
-            metrics_frame = QtWidgets.QWidget()
-            metrics_layout = QtWidgets.QHBoxLayout(metrics_frame)
-            metrics_layout.setContentsMargins(0, 0, 0, 0)
-            lf_layout.addWidget(metrics_frame)
-            for k, v in extra.items():
-                tip = extra_tips.get(k, "")
-                val_lf = QtWidgets.QFrame()
-                val_lf.setFrameShape(QtWidgets.QFrame.Shape.Panel)
-                val_layout = QtWidgets.QVBoxLayout(val_lf)
-                label_key = QtWidgets.QLabel(k)
-                label_key.setStyleSheet("color: #6c757d;")
-                label_key.setFont(QtGui.QFont("微软雅黑", 8))
-                label_val = QtWidgets.QLabel(str(v))
-                label_val.setStyleSheet("color: #17a2b8;")
-                label_val.setFont(QtGui.QFont("微软雅黑", 11, QtGui.QFont.Weight.Bold))
-                val_layout.addWidget(label_key)
-                val_layout.addWidget(label_val)
-                if tip:
-                    tip_lbl = QtWidgets.QLabel(tip)
-                    tip_lbl.setStyleSheet("color: #adb5bd;")
-                    tip_lbl.setFont(QtGui.QFont("微软雅黑", 8))
-                    tip_lbl.setWordWrap(True)
-                    val_layout.addWidget(tip_lbl)
-                metrics_layout.addWidget(val_lf)
-
-        # ── 可展开的详细说明 ──
-        if detail_text:
-            detail_visible = ValueHolder(False)
-            detail_content = QtWidgets.QFrame()
-            detail_content.setStyleSheet("background: #f8f9fa;")
-            detail_layout = QtWidgets.QVBoxLayout(detail_content)
-            detail_label = QtWidgets.QLabel(detail_text)
-            detail_label.setStyleSheet("color: #495057;")
-            detail_label.setFont(QtGui.QFont("微软雅黑", 9))
-            detail_label.setWordWrap(True)
-            detail_layout.addWidget(detail_label)
-
-            toggle_btn = QtWidgets.QPushButton("📖 查看指标说明 ▼")
-            toggle_btn.setFont(QtGui.QFont("微软雅黑", 9))
-            toggle_btn.setStyleSheet("color: #007bff;")
-            lf_layout.addWidget(toggle_btn)
-
-            def _make_toggle(dc, tb, dv):
-                def _toggle_detail():
-                    if dv.get():
-                        dc.hide()
-                        tb.setText("📖 查看指标说明 ▼")
-                        dv.set(False)
-                    else:
-                        dc.show()
-                        tb.setText("📖 收起说明 ▲")
-                        dv.set(True)
-                return _toggle_detail
-
-            toggle_btn.clicked.connect(_make_toggle(detail_content, toggle_btn, detail_visible))
-            detail_content.hide()
-            lf_layout.addWidget(detail_content)
 
 
 def _on_single_analysis_done(self, key, result, placeholders):
@@ -1597,21 +1503,32 @@ def refresh_general_dashboard(self, force_refresh=False):
 
     def _worker():
         try:
-            # Fetch fresh analysis data
-            dashboard_data = audio_analasy.refresh_dashboard_data(self, force_refresh=force_refresh)
-            
-            # Schedule UI update — only if the data page is still shown
-            def _safe_update():
-                if not getattr(self, "if_data_form_show", False):
-                    return
-                if not hasattr(self, "data_labels"):
-                    return
-                try:
-                    _update_dashboard_ui(self, dashboard_data)
-                except RuntimeError:
-                    pass
+            # 优先尝试读取缓存，快速展示
+            if not force_refresh:
+                account = getattr(self, "current_acount", None)
+                if account:
+                    import json, os, time
+                    general_path = os.path.join("./details", account, "general.json")
+                    trend_path = os.path.join("./details", account, "trend.png")
+                    if os.path.exists(general_path):
+                        try:
+                            with open(general_path, "r") as f:
+                                cached = json.load(f)
+                            last_time = cached.get("last_cal_time", 0)
+                            if last_time and time.time() - last_time < 120:
+                                cached["trend_path"] = trend_path
+                                if hasattr(self, "data_frame"):
+                                    run_on_ui(lambda payload=cached: _update_dashboard_ui(self, payload))
+                                return  # 缓存有效，直接返回
+                        except Exception:
+                            pass
 
-            run_on_ui(_safe_update)
+            # Fetch fresh analysis data (may be slow)
+            dashboard_data = audio_analasy.refresh_dashboard_data(self, force_refresh=force_refresh)
+
+            # Schedule UI update
+            if hasattr(self, "data_frame"):
+                run_on_ui(lambda payload=dashboard_data: _update_dashboard_ui(self, payload))
         except Exception as e:
             print(f"Error refreshing dashboard: {e}")
             traceback.print_exc()
@@ -1619,41 +1536,26 @@ def refresh_general_dashboard(self, force_refresh=False):
     threading.Thread(target=_worker, daemon=True).start()
 
 def _update_dashboard_ui(self, dashboard_data):
-    # 安全检查：页面已关闭则跳过
-    if not getattr(self, "if_data_form_show", False):
-        return
-    if not hasattr(self, "data_labels"):
-        return
-    if not isinstance(dashboard_data, dict):
-        return
-
     try:
-        # 安全更新 label 的辅助函数
-        def _safe_set(label_dict, key, value):
-            widget = label_dict.get(key)
-            if widget is None:
-                return
-            try:
-                widget.setText(str(value))
-            except RuntimeError:
-                pass
-
         # --- Update Basic Stats in General Tab ---
-        _safe_set(self.data_labels, "朗读总天数", dashboard_data.get('total_days', '--'))
-        _safe_set(self.data_labels, "朗读总时长（秒）", f"{dashboard_data.get('total', 0):.2f}")
-        _safe_set(self.data_labels, "平均朗读时长", f"{dashboard_data.get('average_daily', 0):.2f}")
-        _safe_set(self.data_labels, "当前连续朗读天数", dashboard_data.get('current_streak', '--'))
-        _safe_set(self.data_labels, "历史最长天数", dashboard_data.get('max_streak', '--'))
-        _safe_set(self.data_labels, "平均效率", dashboard_data.get('average_efficiency', '--'))
+        if isinstance(dashboard_data, dict):
+            self.data_labels["朗读总天数"].setText(str(dashboard_data.get('total_days', '--')))
+            self.data_labels["朗读总时长（秒）"].setText(f"{dashboard_data.get('total', 0):.2f}")
+            self.data_labels["平均朗读时长"].setText(f"{dashboard_data.get('average_daily', 0):.2f}")
+            self.data_labels["当前连续朗读天数"].setText(str(dashboard_data.get('current_streak', '--')))
+            self.data_labels["历史最长天数"].setText(str(dashboard_data.get('max_streak', '--')))
+            self.data_labels["平均效率"].setText(str(dashboard_data.get('average_efficiency', '--')))
+        else:
+            print("Error: dashboard_data is not a dictionary.")
 
         # Update Records
         eff_date = dashboard_data.get('max_efficiency_date', '----/--/--')
         eff_val = dashboard_data.get('max_efficiency_val', 0.0)
-        _safe_set(self.data_labels, "最高效率", f"{eff_val:.0%} ({eff_date})")
+        self.data_labels["最高效率"].setText(f"{eff_val:.0%} ({eff_date})")
 
         dur_date = dashboard_data.get('max_duration_date', '----/--/--')
         dur_val = dashboard_data.get('max_duration_val', 0.0)
-        _safe_set(self.data_labels, "最长时长", f"{dur_val:.0f}s ({dur_date})")
+        self.data_labels["最长时长"].setText(f"{dur_val:.0f}s ({dur_date})")
 
         # --- Update Charts (Heatmap & Trend) ---
         heatmap_paths_raw = dashboard_data.get('heatmap_paths', {})

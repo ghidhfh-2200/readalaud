@@ -83,6 +83,9 @@ class _NativeSplash:
             user32.BeginPaint.argtypes = [wintypes.HWND, ctypes.POINTER(PAINTSTRUCT)]
             user32.BeginPaint.restype = wintypes.HDC
             user32.EndPaint.argtypes = [wintypes.HWND, ctypes.POINTER(PAINTSTRUCT)]
+            user32.EndPaint.restype = wintypes.BOOL
+            user32.FillRect.argtypes = [wintypes.HDC, ctypes.POINTER(wintypes.RECT), wintypes.HBRUSH]
+            user32.FillRect.restype = ctypes.c_int
             user32.DefWindowProcW.argtypes = [
                 wintypes.HWND,
                 wintypes.UINT,
@@ -92,63 +95,76 @@ class _NativeSplash:
             user32.DefWindowProcW.restype = LRESULT
             user32.CreateWindowExW.restype = wintypes.HWND
             gdi32.GetStockObject.restype = wintypes.HANDLE
+            gdi32.CreateSolidBrush.argtypes = [wintypes.COLORREF]
+            gdi32.CreateSolidBrush.restype = wintypes.HBRUSH
+            gdi32.DeleteObject.argtypes = [wintypes.HGDIOBJ]
+            gdi32.DeleteObject.restype = wintypes.BOOL
+            gdi32.CreateFontW.restype = wintypes.HFONT
+            gdi32.SelectObject.argtypes = [wintypes.HDC, wintypes.HGDIOBJ]
+            gdi32.SelectObject.restype = wintypes.HGDIOBJ
+            gdi32.SetBkMode.argtypes = [wintypes.HDC, ctypes.c_int]
+            gdi32.SetBkMode.restype = ctypes.c_int
+            gdi32.SetTextColor.argtypes = [wintypes.HDC, wintypes.COLORREF]
+            gdi32.SetTextColor.restype = wintypes.COLORREF
+            user32.DrawIconEx.argtypes = [
+                wintypes.HDC, ctypes.c_int, ctypes.c_int, wintypes.HICON,
+                ctypes.c_int, ctypes.c_int, wintypes.UINT, wintypes.HBRUSH, wintypes.UINT,
+            ]
+            user32.DrawIconEx.restype = wintypes.BOOL
+            user32.LoadImageW.restype = wintypes.HANDLE
+            user32.DestroyIcon.argtypes = [wintypes.HICON]
+            user32.DestroyIcon.restype = wintypes.BOOL
+            user32.DrawTextW.argtypes = [wintypes.HDC, wintypes.LPCWSTR, ctypes.c_int, ctypes.POINTER(wintypes.RECT), wintypes.UINT]
+            user32.DrawTextW.restype = ctypes.c_int
 
             def wnd_proc(hwnd, msg, wparam, lparam):
                 if msg == 0x000F:  # WM_PAINT
                     ps = PAINTSTRUCT()
                     hdc = user32.BeginPaint(hwnd, ctypes.byref(ps))
-                    brush = gdi32.CreateSolidBrush(0x00FFFFFF)
-                    rect = wintypes.RECT(0, 0, width, height)
-                    user32.FillRect(hdc, ctypes.byref(rect), brush)
-                    gdi32.DeleteObject(brush)
+                    try:
+                        brush = gdi32.CreateSolidBrush(0x00FFFFFF)
+                        rect = wintypes.RECT(0, 0, width, height)
+                        user32.FillRect(hdc, ctypes.byref(rect), brush)
+                        gdi32.DeleteObject(brush)
 
-                    if ICON_PATH.exists():
-                        icon = user32.LoadImageW(
-                            None,
-                            str(ICON_PATH),
-                            1,  # IMAGE_ICON
-                            160,
-                            160,
-                            0x00000010,  # LR_LOADFROMFILE
+                        if ICON_PATH.exists():
+                            icon = user32.LoadImageW(
+                                None,
+                                str(ICON_PATH),
+                                1,  # IMAGE_ICON
+                                160,
+                                160,
+                                0x00000010,  # LR_LOADFROMFILE
+                            )
+                            if icon:
+                                user32.DrawIconEx(hdc, 70, 38, icon, 160, 160, 0, None, 0x0003)
+                                user32.DestroyIcon(icon)
+
+                        font = gdi32.CreateFontW(
+                            22, 0, 0, 0,
+                            400, 0, 0, 0,
+                            134, 0, 0, 0, 0,
+                            "Microsoft YaHei",
                         )
-                        if icon:
-                            user32.DrawIconEx(hdc, 70, 38, icon, 160, 160, 0, None, 0x0003)
-                            user32.DestroyIcon(icon)
-
-                    old_font = None
-                    font = gdi32.CreateFontW(
-                        22,
-                        0,
-                        0,
-                        0,
-                        400,
-                        0,
-                        0,
-                        0,
-                        134,
-                        0,
-                        0,
-                        0,
-                        0,
-                        "Microsoft YaHei",
-                    )
-                    if font:
-                        old_font = gdi32.SelectObject(hdc, font)
-                    gdi32.SetBkMode(hdc, 1)
-                    gdi32.SetTextColor(hdc, 0x00000000)
-                    text_rect = wintypes.RECT(0, 218, width, 280)
-                    user32.DrawTextW(
-                        hdc,
-                        "告别摸鱼偷懒\r\n回归大声早读",
-                        -1,
-                        ctypes.byref(text_rect),
-                        0x0001 | 0x0020 | 0x0800,
-                    )
-                    if old_font:
-                        gdi32.SelectObject(hdc, old_font)
-                    if font:
-                        gdi32.DeleteObject(font)
-                    user32.EndPaint(hwnd, ctypes.byref(ps))
+                        old_font = None
+                        if font:
+                            old_font = gdi32.SelectObject(hdc, font)
+                        gdi32.SetBkMode(hdc, 1)
+                        gdi32.SetTextColor(hdc, 0x00000000)
+                        text_rect = wintypes.RECT(0, 218, width, 280)
+                        user32.DrawTextW(
+                            hdc,
+                            "告别摸鱼偷懒\r\n回归大声早读",
+                            -1,
+                            ctypes.byref(text_rect),
+                            0x0001 | 0x0020 | 0x0800,
+                        )
+                        if old_font:
+                            gdi32.SelectObject(hdc, old_font)
+                        if font:
+                            gdi32.DeleteObject(font)
+                    finally:
+                        user32.EndPaint(hwnd, ctypes.byref(ps))
                     return 0
                 if msg == 0x0002:  # WM_DESTROY
                     user32.PostQuitMessage(0)

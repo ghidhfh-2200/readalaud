@@ -67,10 +67,16 @@ def fetch_for_daily_data(*args, **kwargs):
     return _fetch_for_daily_data(*args, **kwargs)
 
 
-def generate_reading_report(*args, **kwargs):
-    from .audio.report import generate_reading_report as _generate_reading_report
+def generate_llm_report(*args, **kwargs):
+    from .audio.llm_report import generate_llm_report as _generate_llm_report
 
-    return _generate_reading_report(*args, **kwargs)
+    return _generate_llm_report(*args, **kwargs)
+
+
+def get_llm_config(*args, **kwargs):
+    from .audio.llm_report import get_llm_config as _get_llm_config
+
+    return _get_llm_config(*args, **kwargs)
 
 
 def __getattr__(name):
@@ -95,5 +101,6 @@ __all__ = [
     "get_available_months",
     "get_daily_records_by_month",
     "fetch_for_daily_data",
-    "generate_reading_report",
+    "generate_llm_report",
+    "get_llm_config",
 ]

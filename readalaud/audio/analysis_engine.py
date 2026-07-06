@@ -1,12 +1,13 @@
 """
 analysis_engine.py —— 深度音频分析引擎（VAD/RMS/LTAS/ZCR/Pitch/SNR/MFCC/Crest/Entropy/Spectrogram）。
 
-所有分析均为纯数值计算，不依赖 librosa/sklearn，仅使用 numpy + matplotlib。
+VAD 基于 WebRTC VAD（webrtcvad）实现，其余分析使用 numpy + matplotlib。
 """
 import os
 import wave
 import numpy as np
 import matplotlib
+import webrtcvad
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib import cm as _mpl_cm
@@ -201,28 +202,131 @@ def _frame_signal(samples, frame_len, hop_len):
 # ══════════════════════════════════════════════════════════
 
 def _analyze_vad(samples, sr, output_path):
-    frame_len = int(0.025 * sr)
-    hop_len = int(0.010 * sr)
-    frames = _frame_signal(samples, frame_len, hop_len)
-    energy = np.sum(frames ** 2, axis=1)
-    threshold = np.mean(energy) * 0.1 if np.mean(energy) > 0 else 1e-10
-    is_speech = energy > threshold
-    times = np.arange(len(energy)) * hop_len / sr
+    """
+    基于 WebRTC VAD（webrtcvad）的语音活动检测。
 
+    webrtcvad 要求：
+      - 采样率：8000 / 16000 / 32000 / 48000
+      - 帧长：10ms / 20ms / 30ms（对应 160/320/480 样本 @ 16kHz）
+      - 输入：int16 单声道 PCM
+
+    策略：将音频重采样至 16kHz，以 30ms 帧进行 VAD，结果映射回原始时间轴。
+    """
+
+    # 1. 选择 VAD 工作采样率（优先 16kHz，兼顾精度与性能）
+    vad_sr = 16000
+    if sr <= 8000:
+        vad_sr = 8000
+    elif sr <= 16000:
+        vad_sr = 16000
+    elif sr <= 32000:
+        vad_sr = 32000
+    else:
+        vad_sr = 48000
+
+    # 2. 重采样到 VAD 工作采样率（线性插值，无 scipy 依赖）
+    if sr != vad_sr:
+        import math
+        ratio = vad_sr / sr
+        out_len = max(1, int(len(samples) * ratio))
+        indices = np.linspace(0, len(samples) - 1, out_len)
+        lo = np.floor(indices).astype(int)
+        hi = np.clip(lo + 1, 0, len(samples) - 1)
+        frac = indices - lo.astype(float)
+        vad_samples = samples[lo] * (1 - frac) + samples[hi] * frac
+    else:
+        vad_samples = samples.copy()
+
+    # 3. 转换为 int16 PCM（webrtcvad 要求的格式）
+    vad_samples_f64 = np.clip(vad_samples, -1.0, 1.0)
+    pcm_int16 = (vad_samples_f64 * 32767).astype(np.int16)
+
+    # 4. 配置 VAD
+    #    mode: 0=Normal, 1=Low Bitrate, 2=Aggressive, 3=Very Aggressive
+    #    朗读场景使用 2（Aggressive），避免环境噪声被误判为语音
+    vad = webrtcvad.Vad(2)
+
+    # 5. 以 30ms 帧长进行 VAD（30ms = 960 样本 @ 32kHz 对应的 480 @ 16kHz）
+    frame_ms = 30
+    frame_size = int(vad_sr * frame_ms / 1000)
+
+    total_frames = len(pcm_int16) // frame_size
+    if total_frames == 0:
+        # 音频太短，不足一帧
+        is_speech = np.array([False])
+        times = np.array([0.0])
+    else:
+        speech_per_frame = []
+        for i in range(total_frames):
+            chunk = pcm_int16[i * frame_size: (i + 1) * frame_size]
+            try:
+                is_speech_flag = vad.is_speech(chunk.tobytes(), vad_sr)
+            except Exception:
+                is_speech_flag = False
+            speech_per_frame.append(is_speech_flag)
+        is_speech = np.array(speech_per_frame)
+
+    # 6. 映射回原始时间轴
+    #    VAD 帧时间轴（秒，按原始时长映射）
+    vad_times = np.arange(len(is_speech)) * frame_ms / 1000.0
+
+    #    计算能量曲线用于图表叠加（在原始采样率下）
+    orig_frame_len = int(0.025 * sr)
+    orig_hop_len = int(0.010 * sr)
+    orig_frames = _frame_signal(samples, orig_frame_len, orig_hop_len)
+    energy = np.sum(orig_frames ** 2, axis=1)
+    times = np.arange(len(energy)) * orig_hop_len / sr
+
+    # 7. 将 VAD 决策映射到能量帧时间轴
+    #    每个能量帧对应一个时间点，查找最近的 VAD 帧决策
+    if len(is_speech) > 0 and len(times) > 0:
+        vad_frame_indices = np.clip(
+            (times / (frame_ms / 1000.0)).astype(int), 0, len(is_speech) - 1
+        )
+        is_speech_mapped = is_speech[vad_frame_indices]
+    else:
+        is_speech_mapped = np.zeros(len(times), dtype=bool)
+
+    # 8. 绘制图表
     fig = _make_fig(10, 2.5)
     ax = fig.add_subplot(111)
     e_norm = energy / energy.max() if energy.max() > 0 else energy
-    ax.fill_between(times, is_speech.astype(float), alpha=0.4, color="#28a745", label="语音段")
+    ax.fill_between(
+        times, is_speech_mapped.astype(float),
+        alpha=0.4, color="#28a745", label="语音段 (WebRTC VAD)"
+    )
     ax.plot(times, e_norm, color="#007acc", linewidth=0.5, alpha=0.6, label="能量")
     ax.set_xlabel("时间 (s)", fontproperties=_CJK_FONT_FAMILY)
     ax.set_ylabel("活动", fontproperties=_CJK_FONT_FAMILY)
-    ax.set_title("语音活动检测 (VAD)", fontproperties=_CJK_FONT_FAMILY, fontsize=10)
+    ax.set_title(
+        f"语音活动检测 (WebRTC VAD, mode=2, {vad_sr}Hz/{frame_ms}ms)",
+        fontproperties=_CJK_FONT_FAMILY, fontsize=10,
+    )
     ax.legend(prop={"family": _CJK_FONT_FAMILY, "size": 8})
     ax.set_ylim(-0.05, 1.15)
     fig.tight_layout()
     _save_fig(fig, output_path)
-    speech_ratio = np.sum(is_speech) / len(is_speech) if len(is_speech) > 0 else 0
-    return {"语音占比": f"{speech_ratio:.1%}"}
+
+    # 9. 统计指标
+    speech_ratio = (
+        float(np.sum(is_speech_mapped) / len(is_speech_mapped))
+        if len(is_speech_mapped) > 0 else 0.0
+    )
+
+    # 计算语音段个数和平均段长（基于原始 is_speech 而非映射后的）
+    changes = np.diff(np.concatenate(([False], is_speech, [False])).astype(int))
+    speech_starts = np.where(changes == 1)[0]
+    speech_ends = np.where(changes == -1)[0]
+    speech_durations = speech_ends - speech_starts
+    avg_segment_len = float(np.mean(speech_durations)) if len(speech_durations) > 0 else 0.0
+    num_segments = len(speech_durations)
+
+    return {
+        "语音占比": f"{speech_ratio:.1%}",
+        "语音段数": str(num_segments),
+        "平均段长": f"{avg_segment_len * frame_ms / 1000.0:.1f}s",
+        "VAD采样率": f"{vad_sr} Hz",
+    }
 
 
 def _analyze_rms(samples, sr, output_path):
@@ -241,7 +345,16 @@ def _analyze_rms(samples, sr, output_path):
     ax.set_title("短时能量 (RMS)", fontproperties=_CJK_FONT_FAMILY, fontsize=10)
     fig.tight_layout()
     _save_fig(fig, output_path)
-    return {"均值RMS": f"{np.mean(rms):.4f}", "最大RMS": f"{np.max(rms):.4f}"}
+    rms_mean = float(np.mean(rms))
+    rms_std = float(np.std(rms))
+    rms_cv = rms_std / rms_mean if rms_mean > 1e-12 else 0.0
+    rms_max = float(np.max(rms))
+    return {
+        "均值RMS": f"{rms_mean:.4f}",
+        "RMS标准差": f"{rms_std:.4f}",
+        "RMS变异系数": f"{rms_cv:.3f}",
+        "最大RMS": f"{rms_max:.4f}",
+    }
 
 
 def _analyze_ltas(samples, sr, output_path):
@@ -300,7 +413,9 @@ def _analyze_zcr(samples, sr, output_path):
     ax.set_title("过零率变化", fontproperties=_CJK_FONT_FAMILY, fontsize=10)
     fig.tight_layout()
     _save_fig(fig, output_path)
-    return {"平均ZCR": f"{np.mean(zcr):.4f}"}
+    zcr_mean = float(np.mean(zcr))
+    zcr_std = float(np.std(zcr))
+    return {"平均ZCR": f"{zcr_mean:.4f}", "ZCR标准差": f"{zcr_std:.4f}"}
 
 
 def _analyze_pitch(samples, sr, output_path):
@@ -340,8 +455,16 @@ def _analyze_pitch(samples, sr, output_path):
     fig.tight_layout()
     _save_fig(fig, output_path)
     valid = pitches[pitches > 0]
-    mean_f0 = f"{np.mean(valid):.1f} Hz" if len(valid) > 0 else "N/A"
-    return {"平均F0": mean_f0}
+    if len(valid) > 0:
+        f0_mean = float(np.mean(valid))
+        f0_std = float(np.std(valid))
+        f0_cv = f0_std / f0_mean if f0_mean > 1e-12 else 0.0
+        return {
+            "平均F0": f"{f0_mean:.1f} Hz",
+            "F0标准差": f"{f0_std:.1f}",
+            "F0变异系数": f"{f0_cv:.3f}",
+        }
+    return {"平均F0": "N/A", "F0标准差": "N/A", "F0变异系数": "N/A"}
 
 
 def _analyze_snr(samples, sr, output_path):
@@ -434,7 +557,9 @@ def _analyze_crest(samples, sr, output_path):
     ax.set_title("峰值因子 (Crest Factor)", fontproperties=_CJK_FONT_FAMILY, fontsize=10)
     fig.tight_layout()
     _save_fig(fig, output_path)
-    return {"平均峰值因子": f"{np.mean(crest_db):.1f} dB"}
+    crest_mean = float(np.mean(crest_db))
+    crest_std = float(np.std(crest_db))
+    return {"平均峰值因子": f"{crest_mean:.1f} dB", "峰值因子标准差": f"{crest_std:.1f} dB"}
 
 
 def _analyze_entropy(samples, sr, output_path):

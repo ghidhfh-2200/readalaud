@@ -8,6 +8,7 @@ from markdown import markdown
 from ..settings import _load_settings, update_setting, get_tts_cache, update_tts_cache
 from ..settings.tts_settings import _parse_trigger_display
 from .qt_helpers import ValueHolder
+from .qt_helpers import run_on_ui
 from .tts_gui import (
     on_treeview_click,
     volume_scale_change,
@@ -72,9 +73,11 @@ def _generate_settings_gui(self):
     account_frame = QtWidgets.QWidget()
     read_frame = QtWidgets.QWidget()
     customize_frame = QtWidgets.QWidget()
+    llm_frame = QtWidgets.QWidget()
     notebook.addTab(read_frame, "朗读设置")
     notebook.addTab(account_frame, "账号与安全")
     notebook.addTab(customize_frame, "个性化")
+    notebook.addTab(llm_frame, "AI 报告")
     self.settings_layout.addWidget(notebook, 1)
 
     # ── account frame ──
@@ -85,6 +88,9 @@ def _generate_settings_gui(self):
 
     # ── customize frame ──
     _build_customize_tab(self, customize_frame)
+
+    # ── llm frame ──
+    _build_llm_tab(self, llm_frame)
 
     # 返回按钮 — 构建 TTS 缓存，即时保存设置到磁盘，然后导航回去
     def _on_back():
@@ -446,3 +452,198 @@ def _build_customize_tab(self, customize_frame):
     box_layout.addWidget(self.customize_listbox)
     # 选择即切换，无确认按钮
     self.customize_listbox.currentRowChanged.connect(lambda _: self.change_theme())
+
+
+# ═══════════════════════ AI 报告 (LLM) Tab ═══════════════════════
+
+def _build_llm_tab(self, llm_frame):
+    """构建 LLM / AI 朗读报告设置页面（OpenAI 兼容接口）。"""
+    from ..audio.llm_report import get_llm_config
+
+    layout = QtWidgets.QVBoxLayout(llm_frame)
+    layout.setSpacing(12)
+
+    cfg = get_llm_config()
+
+    # ── 启用开关 ──
+    enable_frame = QtWidgets.QWidget()
+    enable_layout = QtWidgets.QHBoxLayout(enable_frame)
+    enable_layout.setContentsMargins(0, 0, 0, 0)
+    self.settings_llm_enabled = ValueHolder(cfg.get("llm_enabled", True))
+    llm_checkbox = QtWidgets.QCheckBox("启用 AI 朗读报告（需要大模型 API）")
+    llm_checkbox.setFont(QtGui.QFont("微软雅黑", 12))
+    llm_checkbox.setChecked(self.settings_llm_enabled.get())
+    llm_checkbox.toggled.connect(lambda v: self.settings_llm_enabled.set(v))
+    llm_checkbox.toggled.connect(lambda v: update_setting("llm_enabled", v))
+    enable_layout.addWidget(llm_checkbox)
+    layout.addWidget(enable_frame)
+
+    # ── 说明 ──
+    info_label = QtWidgets.QLabel(
+        "💡 AI 报告通过 OpenAI 兼容接口调用大模型（如 Qwen、DeepSeek、GPT 等）分析朗读数据。\n"
+        "请填写你的 API Key、Base URL 和模型名称。支持任何兼容 OpenAI responses.create 的接口。"
+    )
+    info_label.setWordWrap(True)
+    info_label.setStyleSheet("color: #6c757d; font-size: 11px;")
+    layout.addWidget(info_label)
+
+    # ── API 配置 ──
+    api_frame = QtWidgets.QGroupBox("API 配置")
+    api_frame.setFont(QtGui.QFont(self.mainpage_button_font[0], self.mainpage_button_font[1]))
+    api_layout = QtWidgets.QVBoxLayout(api_frame)
+
+    # API Key 行
+    key_row = QtWidgets.QWidget()
+    key_layout = QtWidgets.QHBoxLayout(key_row)
+    key_layout.setContentsMargins(0, 0, 0, 0)
+    key_label = QtWidgets.QLabel("API Key:")
+    key_label.setFont(QtGui.QFont("微软雅黑", 12))
+    key_label.setMinimumWidth(100)
+    self.settings_llm_api_key = ValueHolder(cfg.get("llm_api_key", ""))
+    key_entry = QtWidgets.QLineEdit()
+    key_entry.setFont(QtGui.QFont("微软雅黑", 11))
+    key_entry.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
+    key_entry.setPlaceholderText("必填：输入 API Key，如 sk-...")
+    key_entry.setText(self.settings_llm_api_key.get())
+    key_entry.textChanged.connect(lambda t: self.settings_llm_api_key.set(t))
+    key_entry.textChanged.connect(lambda t: update_setting("llm_api_key", t))
+    key_layout.addWidget(key_label)
+    key_layout.addWidget(key_entry, 1)
+
+    show_key_btn = QtWidgets.QPushButton("👁")
+    show_key_btn.setFixedWidth(36)
+    show_key_btn.setToolTip("显示/隐藏 API Key")
+    def _toggle_key_visibility():
+        if key_entry.echoMode() == QtWidgets.QLineEdit.EchoMode.Password:
+            key_entry.setEchoMode(QtWidgets.QLineEdit.EchoMode.Normal)
+            show_key_btn.setText("🙈")
+        else:
+            key_entry.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
+            show_key_btn.setText("👁")
+    show_key_btn.clicked.connect(_toggle_key_visibility)
+    key_layout.addWidget(show_key_btn)
+
+    api_layout.addWidget(key_row)
+
+    # Base URL 行
+    url_row = QtWidgets.QWidget()
+    url_layout = QtWidgets.QHBoxLayout(url_row)
+    url_layout.setContentsMargins(0, 0, 0, 0)
+    url_label = QtWidgets.QLabel("Base URL:")
+    url_label.setFont(QtGui.QFont("微软雅黑", 12))
+    url_label.setMinimumWidth(100)
+    self.settings_llm_base_url = ValueHolder(cfg.get("llm_base_url", ""))
+    url_entry = QtWidgets.QLineEdit()
+    url_entry.setFont(QtGui.QFont("微软雅黑", 11))
+    url_entry.setPlaceholderText("必填：如 https://dashscope.aliyuncs.com/api/v2/apps/protocols/compatible-mode/v1")
+    url_entry.setText(self.settings_llm_base_url.get())
+    url_entry.textChanged.connect(lambda t: self.settings_llm_base_url.set(t))
+    url_entry.textChanged.connect(lambda t: update_setting("llm_base_url", t))
+    url_layout.addWidget(url_label)
+    url_layout.addWidget(url_entry, 1)
+    api_layout.addWidget(url_row)
+
+    # Model 行
+    model_row = QtWidgets.QWidget()
+    model_layout = QtWidgets.QHBoxLayout(model_row)
+    model_layout.setContentsMargins(0, 0, 0, 0)
+    model_label = QtWidgets.QLabel("模型名称:")
+    model_label.setFont(QtGui.QFont("微软雅黑", 12))
+    model_label.setMinimumWidth(100)
+    self.settings_llm_model = ValueHolder(cfg.get("llm_model", ""))
+    model_entry = QtWidgets.QLineEdit()
+    model_entry.setFont(QtGui.QFont("微软雅黑", 11))
+    model_entry.setPlaceholderText("必填：如 qwen3.7-plus / deepseek-chat / gpt-4o")
+    model_entry.setText(self.settings_llm_model.get())
+    model_entry.textChanged.connect(lambda t: self.settings_llm_model.set(t))
+    model_entry.textChanged.connect(lambda t: update_setting("llm_model", t))
+    model_layout.addWidget(model_label)
+    model_layout.addWidget(model_entry, 1)
+    api_layout.addWidget(model_row)
+
+    layout.addWidget(api_frame)
+
+    # ── 预设快速切换 ──
+    presets_frame = QtWidgets.QGroupBox("快速配置预设（仅填充 URL 和模型，Key 需自行填写）")
+    presets_frame.setFont(QtGui.QFont(self.mainpage_button_font[0], self.mainpage_button_font[1]))
+    presets_layout = QtWidgets.QHBoxLayout(presets_frame)
+
+    presets = [
+        ("阿里云百炼 Qwen3.7", "https://dashscope.aliyuncs.com/api/v2/apps/protocols/compatible-mode/v1", "qwen3.7-plus"),
+        ("阿里云百炼 Qwen-Max", "https://dashscope.aliyuncs.com/api/v2/apps/protocols/compatible-mode/v1", "qwen-max"),
+        ("DeepSeek 官方", "https://api.deepseek.com", "deepseek-chat"),
+        ("OpenAI 官方", "https://api.openai.com/v1", "gpt-4o"),
+    ]
+
+    for name, base_url, model in presets:
+        btn = QtWidgets.QPushButton(name)
+        btn.setFont(QtGui.QFont("微软雅黑", 9))
+        btn.clicked.connect(lambda _checked, u=base_url, m=model: (
+            url_entry.setText(u),
+            model_entry.setText(m),
+            update_setting("llm_base_url", u),
+            update_setting("llm_model", m),
+        ))
+        presets_layout.addWidget(btn)
+
+    layout.addWidget(presets_frame)
+
+    # ── 测试连接按钮 ──
+    test_frame = QtWidgets.QWidget()
+    test_layout = QtWidgets.QHBoxLayout(test_frame)
+    test_layout.setContentsMargins(0, 0, 0, 0)
+
+    self.llm_test_result = QtWidgets.QLabel("")
+    self.llm_test_result.setFont(QtGui.QFont("微软雅黑", 10))
+
+    test_btn = QtWidgets.QPushButton("🔌 测试连接")
+    test_btn.setFont(QtGui.QFont("微软雅黑", 11))
+    test_btn.clicked.connect(lambda: _test_llm_connection(self))
+    test_layout.addWidget(test_btn)
+    test_layout.addWidget(self.llm_test_result, 1)
+    layout.addWidget(test_frame)
+
+    layout.addStretch(1)
+
+
+def _test_llm_connection(self):
+    """测试 LLM 连接是否正常。"""
+    import threading
+
+    self.llm_test_result.setText("⏳ 正在测试连接...")
+    self.llm_test_result.setStyleSheet("color: #ffc107;")
+
+    def _worker():
+        try:
+            from ..audio.llm_report import get_llm_config
+            from openai import OpenAI
+
+            cfg = get_llm_config()
+            if not cfg.get("llm_api_key") or not cfg.get("llm_base_url") or not cfg.get("llm_model"):
+                def _need_config():
+                    self.llm_test_result.setText("❌ 请先填写 API Key、Base URL 和模型名称")
+                    self.llm_test_result.setStyleSheet("color: #dc3545;")
+                run_on_ui(_need_config)
+                return
+
+            client = OpenAI(api_key=cfg["llm_api_key"], base_url=cfg["llm_base_url"])
+
+            response = client.responses.create(
+                model=cfg["llm_model"],
+                input="Hi",
+            )
+
+            def _ok():
+                self.llm_test_result.setText("✅ 连接成功！模型可用")
+                self.llm_test_result.setStyleSheet("color: #28a745;")
+            run_on_ui(_ok)
+
+        except Exception as e:
+            msg = str(e)[:120]
+
+            def _fail():
+                self.llm_test_result.setText(f"❌ 连接失败：{msg}")
+                self.llm_test_result.setStyleSheet("color: #dc3545;")
+            run_on_ui(_fail)
+
+    threading.Thread(target=_worker, daemon=True).start()
