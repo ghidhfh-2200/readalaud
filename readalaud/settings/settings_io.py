@@ -13,7 +13,20 @@ import threading
 
 from PySide6 import QtCore, QtWidgets
 
-DEFAULT_SETTINGS = {"goal": 0, "stop-dur": 0, "db-level": 0, "calibration": 94, "theme": "darkly", "if_tts": 0}
+DEFAULT_SETTINGS = {
+    "goal": 0,
+    "stop-dur": 0,
+    "db-level": 0,
+    "calibration": 94,
+    "theme": "darkly",
+    "if_tts": 0,
+    "llm_enabled": True,
+    "llm_api_key": "",
+    "llm_base_url": "",
+    "llm_model": "",
+    "llm_configs": [],
+    "llm_active_config_id": "",
+}
 
 # ── 全局设置缓存 ──────────────────────────────────────────
 

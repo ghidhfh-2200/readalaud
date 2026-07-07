@@ -5,7 +5,7 @@
 """
 from PySide6 import QtCore, QtWidgets, QtGui
 from markdown import markdown
-from ..settings import _load_settings, update_setting, get_tts_cache, update_tts_cache
+from ..settings import _load_settings, get_setting, update_setting, get_tts_cache, update_tts_cache
 from ..settings.tts_settings import _parse_trigger_display
 from .qt_helpers import ValueHolder
 from .qt_helpers import run_on_ui
@@ -454,6 +454,88 @@ def _build_customize_tab(self, customize_frame):
     self.customize_listbox.currentRowChanged.connect(lambda _: self.change_theme())
 
 
+def _normalize_llm_configs(cfg):
+    """Return saved LLM configs in a stable field-based settings.json shape."""
+    configs = cfg.get("llm_configs") or []
+    if not isinstance(configs, list):
+        configs = []
+
+    normalized = []
+    seen_ids = set()
+    for index, item in enumerate(configs):
+        if not isinstance(item, dict):
+            continue
+
+        config_id = str(item.get("id") or f"llm_config_{index + 1}")
+        if config_id in seen_ids:
+            config_id = f"{config_id}_{index + 1}"
+        seen_ids.add(config_id)
+
+        name = str(item.get("name") or item.get("llm_model") or f"配置 {index + 1}")
+        normalized.append({
+            "id": config_id,
+            "name": name,
+            "api_key": str(item.get("api_key") or item.get("llm_api_key") or ""),
+            "base_url": str(item.get("base_url") or item.get("llm_base_url") or ""),
+            "model": str(item.get("model") or item.get("llm_model") or ""),
+        })
+
+    has_active_values = bool(
+        cfg.get("llm_api_key") or cfg.get("llm_base_url") or cfg.get("llm_model")
+    )
+    if not normalized and has_active_values:
+        normalized.append({
+            "id": "llm_config_1",
+            "name": cfg.get("llm_model") or "默认配置",
+            "api_key": cfg.get("llm_api_key", ""),
+            "base_url": cfg.get("llm_base_url", ""),
+            "model": cfg.get("llm_model", ""),
+        })
+
+    active_id = str(cfg.get("llm_active_config_id") or "")
+    if not active_id and normalized:
+        active_id = normalized[0]["id"]
+
+    update_setting("llm_configs", normalized)
+    update_setting("llm_active_config_id", active_id)
+    return normalized, active_id
+
+
+def _mask_api_key(api_key):
+    if not api_key:
+        return ""
+    if len(api_key) <= 8:
+        return "*" * len(api_key)
+    return f"{api_key[:4]}...{api_key[-4:]}"
+
+
+def _set_llm_active_config(config):
+    update_setting("llm_active_config_id", config.get("id", ""))
+    update_setting("llm_api_key", config.get("api_key", ""))
+    update_setting("llm_base_url", config.get("base_url", ""))
+    update_setting("llm_model", config.get("model", ""))
+
+
+def _fill_llm_config_table(table, configs, active_id):
+    table.blockSignals(True)
+    table.setRowCount(0)
+    for row, config in enumerate(configs):
+        table.insertRow(row)
+        active_text = "当前" if config.get("id") == active_id else ""
+        row_values = [
+            active_text,
+            config.get("name", ""),
+            config.get("model", ""),
+            config.get("base_url", ""),
+            _mask_api_key(config.get("api_key", "")),
+        ]
+        for column, value in enumerate(row_values):
+            item = QtWidgets.QTableWidgetItem(str(value))
+            item.setFlags(item.flags() & ~QtCore.Qt.ItemFlag.ItemIsEditable)
+            table.setItem(row, column, item)
+    table.blockSignals(False)
+
+
 # ═══════════════════════ AI 报告 (LLM) Tab ═══════════════════════
 
 def _build_llm_tab(self, llm_frame):
@@ -464,6 +546,18 @@ def _build_llm_tab(self, llm_frame):
     layout.setSpacing(12)
 
     cfg = get_llm_config()
+    cfg["llm_configs"] = get_setting("llm_configs", [])
+    cfg["llm_active_config_id"] = get_setting("llm_active_config_id", "")
+    llm_configs, active_config_id = _normalize_llm_configs(cfg)
+    active_config = next(
+        (config for config in llm_configs if config.get("id") == active_config_id),
+        None,
+    )
+    if active_config and not (cfg.get("llm_api_key") or cfg.get("llm_base_url") or cfg.get("llm_model")):
+        cfg["llm_api_key"] = active_config.get("api_key", "")
+        cfg["llm_base_url"] = active_config.get("base_url", "")
+        cfg["llm_model"] = active_config.get("model", "")
+        _set_llm_active_config(active_config)
 
     # ── 启用开关 ──
     enable_frame = QtWidgets.QWidget()
@@ -563,30 +657,137 @@ def _build_llm_tab(self, llm_frame):
 
     layout.addWidget(api_frame)
 
-    # ── 预设快速切换 ──
-    presets_frame = QtWidgets.QGroupBox("快速配置预设（仅填充 URL 和模型，Key 需自行填写）")
-    presets_frame.setFont(QtGui.QFont(self.mainpage_button_font[0], self.mainpage_button_font[1]))
-    presets_layout = QtWidgets.QHBoxLayout(presets_frame)
+    # ── 已保存配置表 ──
+    configs_frame = QtWidgets.QGroupBox("已保存的大模型配置")
+    configs_frame.setFont(QtGui.QFont(self.mainpage_button_font[0], self.mainpage_button_font[1]))
+    configs_layout = QtWidgets.QVBoxLayout(configs_frame)
 
-    presets = [
-        ("阿里云百炼 Qwen3.7", "https://dashscope.aliyuncs.com/api/v2/apps/protocols/compatible-mode/v1", "qwen3.7-plus"),
-        ("阿里云百炼 Qwen-Max", "https://dashscope.aliyuncs.com/api/v2/apps/protocols/compatible-mode/v1", "qwen-max"),
-        ("DeepSeek 官方", "https://api.deepseek.com", "deepseek-chat"),
-        ("OpenAI 官方", "https://api.openai.com/v1", "gpt-4o"),
-    ]
+    config_table = QtWidgets.QTableWidget()
+    config_table.setColumnCount(5)
+    config_table.setHorizontalHeaderLabels(["状态", "名称", "模型", "Base URL", "API Key"])
+    config_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
+    config_table.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
+    config_table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
+    config_table.verticalHeader().setVisible(False)
+    config_table.setMinimumHeight(160)
+    config_table.horizontalHeader().setStretchLastSection(True)
+    config_table.horizontalHeader().setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
+    config_table.horizontalHeader().setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
+    config_table.horizontalHeader().setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
+    config_table.horizontalHeader().setSectionResizeMode(3, QtWidgets.QHeaderView.ResizeMode.Stretch)
+    config_table.horizontalHeader().setSectionResizeMode(4, QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
+    configs_layout.addWidget(config_table)
 
-    for name, base_url, model in presets:
-        btn = QtWidgets.QPushButton(name)
-        btn.setFont(QtGui.QFont("微软雅黑", 9))
-        btn.clicked.connect(lambda _checked, u=base_url, m=model: (
-            url_entry.setText(u),
-            model_entry.setText(m),
-            update_setting("llm_base_url", u),
-            update_setting("llm_model", m),
-        ))
-        presets_layout.addWidget(btn)
+    config_buttons = QtWidgets.QWidget()
+    config_buttons_layout = QtWidgets.QHBoxLayout(config_buttons)
+    config_buttons_layout.setContentsMargins(0, 0, 0, 0)
 
-    layout.addWidget(presets_frame)
+    config_name_entry = QtWidgets.QLineEdit()
+    config_name_entry.setFont(QtGui.QFont("微软雅黑", 10))
+    config_name_entry.setPlaceholderText("配置名称，如 Qwen 工作号")
+    config_buttons_layout.addWidget(config_name_entry, 1)
+
+    save_config_btn = QtWidgets.QPushButton("保存当前配置")
+    save_config_btn.setFont(QtGui.QFont("微软雅黑", 10))
+    save_as_config_btn = QtWidgets.QPushButton("另存为新配置")
+    save_as_config_btn.setFont(QtGui.QFont("微软雅黑", 10))
+    delete_config_btn = QtWidgets.QPushButton("删除选中配置")
+    delete_config_btn.setFont(QtGui.QFont("微软雅黑", 10))
+    config_buttons_layout.addWidget(save_config_btn)
+    config_buttons_layout.addWidget(save_as_config_btn)
+    config_buttons_layout.addWidget(delete_config_btn)
+    configs_layout.addWidget(config_buttons)
+
+    self.llm_config_table = config_table
+    self.llm_configs = llm_configs
+
+    def _selected_llm_config_index():
+        row = config_table.currentRow()
+        if row < 0 or row >= len(self.llm_configs):
+            return None
+        return row
+
+    def _refresh_llm_config_table():
+        active_id = get_setting("llm_active_config_id", "")
+        _fill_llm_config_table(config_table, self.llm_configs, active_id)
+        for row, config in enumerate(self.llm_configs):
+            if config.get("id") == active_id:
+                config_table.selectRow(row)
+                return
+        if self.llm_configs:
+            config_table.selectRow(0)
+
+    def _apply_llm_config(row, _column=0):
+        if row < 0 or row >= len(self.llm_configs):
+            return
+        config = self.llm_configs[row]
+        key_entry.setText(config.get("api_key", ""))
+        url_entry.setText(config.get("base_url", ""))
+        model_entry.setText(config.get("model", ""))
+        config_name_entry.setText(config.get("name", ""))
+        _set_llm_active_config(config)
+        _refresh_llm_config_table()
+
+    def _make_llm_config_id():
+        return f"llm_config_{QtCore.QDateTime.currentMSecsSinceEpoch()}"
+
+    def _save_current_llm_config(force_new=False):
+        name = config_name_entry.text().strip() or model_entry.text().strip() or "未命名配置"
+        current_id = get_setting("llm_active_config_id", "")
+        selected_index = _selected_llm_config_index()
+        if selected_index is not None and not force_new:
+            current_id = self.llm_configs[selected_index].get("id", current_id)
+
+        config = {
+            "id": _make_llm_config_id() if force_new else current_id or _make_llm_config_id(),
+            "name": name,
+            "api_key": key_entry.text(),
+            "base_url": url_entry.text(),
+            "model": model_entry.text(),
+        }
+
+        replace_index = next(
+            (index for index, item in enumerate(self.llm_configs) if item.get("id") == config["id"]),
+            None,
+        )
+        if replace_index is None:
+            self.llm_configs.append(config)
+        else:
+            self.llm_configs[replace_index] = config
+
+        update_setting("llm_configs", self.llm_configs)
+        _set_llm_active_config(config)
+        _refresh_llm_config_table()
+
+    def _delete_selected_llm_config():
+        selected_index = _selected_llm_config_index()
+        if selected_index is None:
+            return
+
+        removed_config = self.llm_configs.pop(selected_index)
+        update_setting("llm_configs", self.llm_configs)
+
+        if get_setting("llm_active_config_id", "") == removed_config.get("id"):
+            if self.llm_configs:
+                _set_llm_active_config(self.llm_configs[0])
+                key_entry.setText(self.llm_configs[0].get("api_key", ""))
+                url_entry.setText(self.llm_configs[0].get("base_url", ""))
+                model_entry.setText(self.llm_configs[0].get("model", ""))
+                config_name_entry.setText(self.llm_configs[0].get("name", ""))
+            else:
+                update_setting("llm_active_config_id", "")
+
+        _refresh_llm_config_table()
+
+    config_table.cellClicked.connect(_apply_llm_config)
+    save_config_btn.clicked.connect(_save_current_llm_config)
+    save_as_config_btn.clicked.connect(lambda _checked=False: _save_current_llm_config(force_new=True))
+    delete_config_btn.clicked.connect(_delete_selected_llm_config)
+    _refresh_llm_config_table()
+    if self.llm_configs:
+        config_name_entry.setText(self.llm_configs[config_table.currentRow()].get("name", ""))
+
+    layout.addWidget(configs_frame)
 
     # ── 测试连接按钮 ──
     test_frame = QtWidgets.QWidget()
