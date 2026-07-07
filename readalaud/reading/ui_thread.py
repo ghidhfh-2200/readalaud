@@ -1,9 +1,9 @@
 """
 ui_thread.py —— UI 更新线程：将后台数据线程的更新安全推送到 Qt。
 """
-import datetime
 import queue as queue_module
 from ..gui.qt_helpers import run_on_ui
+from ..time_utils import format_duration
 
 
 def ui_thread(ui_queue, state_label, information_label_list):
@@ -25,10 +25,10 @@ def ui_thread(ui_queue, state_label, information_label_list):
 
                 if info:
                     texts = [
-                        f"剩余时长: {datetime.timedelta(seconds=int(info['left']))}",
-                        f"停顿总时长: {datetime.timedelta(seconds=int(info['stop_total']))}",
-                        f"有效朗读时间: {datetime.timedelta(seconds=int(info['real_read_time']))}",
-                        f"总时长: {datetime.timedelta(seconds=int(info['total']))}",
+                        f"剩余时长: {format_duration(info['left'])}",
+                        f"停顿总时长: {format_duration(info['stop_total'])}",
+                        f"有效朗读时间: {format_duration(info['real_read_time'])}",
+                        f"总时长: {format_duration(info['total'])}",
                         f"最大音量: {info['max_sound']}",
                         f"效率: {info['efficiency']}",
                     ]

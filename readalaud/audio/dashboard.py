@@ -79,42 +79,21 @@ def total_time_calculate(self):
 
 # ── 综合看板刷新 ──────────────────────────────────────────
 
-def refresh_dashboard_data(self, force_refresh=False):
-    """
-    综合数据看板刷新接口。
-    具备缓存节流（120s），计算总时长/天数/均值/连胜并生成图表。
-    注意：热力图/趋势图生成可能较慢（matplotlib），在 force_refresh 时走完整流程。
-    """
+def _compute_dashboard_stats(self):
+    """纯数据计算阶段（快速，无图表生成）。返回 (result_data, plot_data_list, details_dir, general_path, trend_path)。"""
     account = getattr(self, "current_acount", None)
     if not account:
-        return {}
+        return {}, [], "", "", ""
 
     details_dir = f"./details/{account}"
     general_path = os.path.join(details_dir, "general.json")
     trend_path = os.path.join(details_dir, "trend.png")
     os.makedirs(details_dir, exist_ok=True)
 
-    current_ts = time.time()
-
-    # ── 快速检查缓存 ──
-    if not force_refresh and os.path.exists(general_path):
-        try:
-            with open(general_path, "r") as f:
-                cached_data = json.load(f)
-            last_time = cached_data.get("last_cal_time")
-            cached_hm = cached_data.get("heatmap_paths", {})
-            has_heatmaps = any(os.path.exists(p) for p in cached_hm.values())
-            if last_time and (current_ts - last_time < 120) and has_heatmaps and os.path.exists(trend_path):
-                cached_data["trend_path"] = trend_path
-                return cached_data
-        except (json.JSONDecodeError, OSError):
-            pass
-
     base_url = f"./data/{account}/"
     if not os.path.exists(base_url):
-        return {}
+        return {}, [], details_dir, general_path, trend_path
 
-    # ── 遍历数据文件 ──
     total_time = 0
     total_efficiency_acc = 0.0
     valid_dates = []
@@ -156,11 +135,17 @@ def refresh_dashboard_data(self, force_refresh=False):
     average_efficiency = total_efficiency_acc / total_days if total_days > 0 else 0.0
     current_streak, max_streak = calculate_streaks(valid_dates)
 
-    # ── 生成图表（可能较慢） ──
-    plot_df = pd.DataFrame(plot_data_list) if plot_data_list else pd.DataFrame(columns=["date", "duration", "efficiency"])
-    heatmap_results = save_heatmap(plot_df, details_dir)
-    save_trend_chart(plot_df, trend_path)
+    # 尝试从缓存读取已有的图表路径（图表可能已存在）
+    cached_hm = {}
+    if os.path.exists(general_path):
+        try:
+            with open(general_path, "r") as f:
+                old = json.load(f)
+            cached_hm = old.get("heatmap_paths", {})
+        except Exception:
+            pass
 
+    current_ts = time.time()
     result_data = {
         "total": total_time,
         "total_days": total_days,
@@ -173,11 +158,78 @@ def refresh_dashboard_data(self, force_refresh=False):
         "max_duration_val": max_duration_val,
         "max_duration_date": max_duration_date,
         "daily_records": [],
-        "heatmap_years": sorted(heatmap_results.keys()),
-        "heatmap_paths": {str(k): v for k, v in heatmap_results.items()},
-        "trend_path": trend_path,
+        "heatmap_years": sorted(cached_hm.keys()),
+        "heatmap_paths": cached_hm,
+        "trend_path": trend_path if os.path.exists(trend_path) else "",
         "last_cal_time": current_ts,
+        "_charts_pending": True,  # 标记图表待更新
     }
+
+    # 立即缓存数据结果，让下次打开能快速显示
+    try:
+        with open(general_path, "w") as f:
+            json.dump(result_data, f, indent=4)
+    except Exception:
+        pass
+
+    return result_data, plot_data_list, details_dir, general_path, trend_path
+
+
+def _generate_dashboard_charts(plot_data_list, details_dir, trend_path):
+    """后台生成图表（慢速，matplotlib）。在数据已显示后异步调用。"""
+    if not plot_data_list:
+        return {}, ""
+    plot_df = pd.DataFrame(plot_data_list)
+    heatmap_results = save_heatmap(plot_df, details_dir)
+    save_trend_chart(plot_df, trend_path)
+    return heatmap_results, trend_path
+
+
+def refresh_dashboard_data(self, force_refresh=False):
+    """
+    综合数据看板刷新接口。
+    具备缓存节流（120s），计算总时长/天数/均值/连胜并生成图表。
+    注意：图表生成（matplotlib）较慢，已分离到 _generate_dashboard_charts。
+    """
+    account = getattr(self, "current_acount", None)
+    if not account:
+        return {}
+
+    details_dir = f"./details/{account}"
+    general_path = os.path.join(details_dir, "general.json")
+    trend_path = os.path.join(details_dir, "trend.png")
+    os.makedirs(details_dir, exist_ok=True)
+
+    current_ts = time.time()
+
+    # ── 快速检查缓存 ──
+    if not force_refresh and os.path.exists(general_path):
+        try:
+            with open(general_path, "r") as f:
+                cached_data = json.load(f)
+            last_time = cached_data.get("last_cal_time")
+            cached_hm = cached_data.get("heatmap_paths", {})
+            has_heatmaps = any(os.path.exists(p) for p in cached_hm.values())
+            if last_time and (current_ts - last_time < 120) and has_heatmaps and os.path.exists(trend_path):
+                cached_data["trend_path"] = trend_path
+                cached_data["_charts_pending"] = False
+                return cached_data
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    # ── 第一阶段：快速数据计算 ──
+    result_data, plot_data_list, _details_dir, _general_path, _trend_path = _compute_dashboard_stats(self)
+    if not result_data:
+        return {}
+
+    # ── 第二阶段：图表生成（慢速，但同步完成以保证数据完整） ──
+    heatmap_results, trend_path_out = _generate_dashboard_charts(plot_data_list, details_dir, trend_path)
+
+    result_data["heatmap_years"] = sorted(heatmap_results.keys())
+    result_data["heatmap_paths"] = {str(k): v for k, v in heatmap_results.items()}
+    result_data["trend_path"] = trend_path_out
+    result_data["last_cal_time"] = time.time()
+    result_data["_charts_pending"] = False
 
     with open(general_path, "w") as f:
         json.dump(result_data, f, indent=4)

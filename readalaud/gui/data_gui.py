@@ -12,6 +12,7 @@ import threading
 from datetime import datetime, timedelta
 from PIL import Image, ImageQt
 from .. import audio_analysis as audio_analasy
+from ..time_utils import format_duration
 from .gui_service import get_gui_service
 from .qt_helpers import ValueHolder
 from .qt_helpers import run_on_ui
@@ -383,7 +384,7 @@ def _build_general_tab(self, general_frame, register_component):
     basic_layout.setColumnStretch(5, 1)
     scroll_layout.addWidget(basic_data_lf)
 
-    headings_row1 = ["朗读总时长（秒）", "朗读总天数", "平均朗读时长", "当前连续朗读天数", "历史最长天数", "平均效率"]
+    headings_row1 = ["朗读总时长", "朗读总天数", "平均朗读时长", "当前连续朗读天数", "历史最长天数", "平均效率"]
     self.data_labels = {}
     stat_items = []
 
@@ -957,9 +958,9 @@ def _build_day_tab(self, day_frame, register_component):
                 return
 
             # Update UI
-            self.detail_val_labels["总时长"].setText(f"{detail_data.get('total_duration', 0)} 秒")
+            self.detail_val_labels["总时长"].setText(format_duration(detail_data.get('total_duration', 0)))
             self.detail_val_labels["总时长"].setStyleSheet("color: #17a2b8;")
-            self.detail_val_labels["停顿总时长"].setText(f"{detail_data.get('pause_duration', 0)} 秒")
+            self.detail_val_labels["停顿总时长"].setText(format_duration(detail_data.get('pause_duration', 0)))
             self.detail_val_labels["停顿总时长"].setStyleSheet("color: #ffc107;")
             self.detail_val_labels["效率"].setText(f"{detail_data.get('efficiency', 0.0):.0%}")
             self.detail_val_labels["效率"].setStyleSheet("color: #28a745;")
@@ -1502,12 +1503,13 @@ def refresh_general_dashboard(self, force_refresh=False):
                  pass
 
     def _worker():
+        import json, os
         try:
+            # ── 第一阶段：快速数据计算 + 缓存（不生成图表，秒级完成）──
             # 优先尝试读取缓存，快速展示
             if not force_refresh:
                 account = getattr(self, "current_acount", None)
                 if account:
-                    import json, os, time
                     general_path = os.path.join("./details", account, "general.json")
                     trend_path = os.path.join("./details", account, "trend.png")
                     if os.path.exists(general_path):
@@ -1515,7 +1517,8 @@ def refresh_general_dashboard(self, force_refresh=False):
                             with open(general_path, "r") as f:
                                 cached = json.load(f)
                             last_time = cached.get("last_cal_time", 0)
-                            if last_time and time.time() - last_time < 120:
+                            charts_pending = cached.get("_charts_pending", False)
+                            if last_time and time.time() - last_time < 120 and not charts_pending:
                                 cached["trend_path"] = trend_path
                                 if hasattr(self, "data_frame"):
                                     run_on_ui(lambda payload=cached: _update_dashboard_ui(self, payload))
@@ -1523,12 +1526,35 @@ def refresh_general_dashboard(self, force_refresh=False):
                         except Exception:
                             pass
 
-            # Fetch fresh analysis data (may be slow)
-            dashboard_data = audio_analasy.refresh_dashboard_data(self, force_refresh=force_refresh)
+            # ── 快速数据计算（先展示数据，图表可暂用旧缓存）──
+            from ..audio.dashboard import _compute_dashboard_stats, _generate_dashboard_charts
 
-            # Schedule UI update
+            result_data, plot_data_list, details_dir, general_path, trend_path = _compute_dashboard_stats(self)
+            if not result_data:
+                return
+
+            # 先立即展示数据（图表可能还是旧的，但数据立即可见）
             if hasattr(self, "data_frame"):
-                run_on_ui(lambda payload=dashboard_data: _update_dashboard_ui(self, payload))
+                run_on_ui(lambda payload=dict(result_data): _update_dashboard_ui(self, payload))
+
+            # ── 第二阶段：后台生成图表（慢速，matplotlib）──
+            if plot_data_list:
+                heatmap_results, trend_path_out = _generate_dashboard_charts(plot_data_list, details_dir, trend_path)
+
+                # 更新缓存中的图表路径
+                result_data["heatmap_years"] = sorted(heatmap_results.keys())
+                result_data["heatmap_paths"] = {str(k): v for k, v in heatmap_results.items()}
+                result_data["trend_path"] = trend_path_out
+                result_data["last_cal_time"] = time.time()
+                result_data["_charts_pending"] = False
+
+                with open(general_path, "w") as f:
+                    json.dump(result_data, f, indent=4)
+
+                # 再次刷新 UI 以显示新图表
+                if hasattr(self, "data_frame"):
+                    run_on_ui(lambda payload=dict(result_data): _update_dashboard_ui(self, payload))
+
         except Exception as e:
             print(f"Error refreshing dashboard: {e}")
             traceback.print_exc()
@@ -1540,8 +1566,8 @@ def _update_dashboard_ui(self, dashboard_data):
         # --- Update Basic Stats in General Tab ---
         if isinstance(dashboard_data, dict):
             self.data_labels["朗读总天数"].setText(str(dashboard_data.get('total_days', '--')))
-            self.data_labels["朗读总时长（秒）"].setText(f"{dashboard_data.get('total', 0):.2f}")
-            self.data_labels["平均朗读时长"].setText(f"{dashboard_data.get('average_daily', 0):.2f}")
+            self.data_labels["朗读总时长"].setText(format_duration(dashboard_data.get('total', 0)))
+            self.data_labels["平均朗读时长"].setText(format_duration(dashboard_data.get('average_daily', 0)))
             self.data_labels["当前连续朗读天数"].setText(str(dashboard_data.get('current_streak', '--')))
             self.data_labels["历史最长天数"].setText(str(dashboard_data.get('max_streak', '--')))
             self.data_labels["平均效率"].setText(str(dashboard_data.get('average_efficiency', '--')))
@@ -1555,7 +1581,8 @@ def _update_dashboard_ui(self, dashboard_data):
 
         dur_date = dashboard_data.get('max_duration_date', '----/--/--')
         dur_val = dashboard_data.get('max_duration_val', 0.0)
-        self.data_labels["最长时长"].setText(f"{dur_val:.0f}s ({dur_date})")
+        # 格式如 "1时30分15秒" 可能太长，日期放换行避免挤压
+        self.data_labels["最长时长"].setText(f"{format_duration(dur_val)}\n({dur_date})")
 
         # --- Update Charts (Heatmap & Trend) ---
         heatmap_paths_raw = dashboard_data.get('heatmap_paths', {})

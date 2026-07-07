@@ -573,15 +573,33 @@
             alert(err)
         })
     }
-    // 卸载页面前的清理工作
+    let endReadingCalled = false;  // 防止重复调用
+
+    // 卸载页面前的清理工作（仅做本地清理，不发送网络请求）
     window.addEventListener('beforeunload', () => {
         stopVisualization();
         if (audioContext) {
             audioContext.close();
         }
-        end_reading()
+        // 如果还没调用过 end_reading，用 navigator.sendBeacon 发送结束信号
+        // sendBeacon 在页面卸载时也能可靠发送
+        if (!endReadingCalled) {
+            const data = JSON.stringify({"end": true});
+            navigator.sendBeacon("http://127.0.0.1:8008/end_reading", new Blob([data], {type: "application/json"}));
+        }
     });
+
     function end_reading() {
+        if (endReadingCalled) return;
+        endReadingCalled = true;
+
+        // 先停止可视化并关闭 WebSocket，避免服务端在清理时还尝试接收音频数据
+        stopVisualization();
+        if (audioContext) {
+            audioContext.close();
+        }
+
+        // 发送结束信号到服务器
         fetch("http://127.0.0.1:8008/end_reading", {
             method: "POST",
             headers: {
@@ -591,15 +609,14 @@
         })
         .then(response => response.json())
         .then(data => {
-            console.log("Response data:", data); // Debugging log
-            if (data && data.msg === "ok") {
-                window.close();
-            } else {
-                alert(`Error: ${data?.msg || "Unexpected response format"}`);
-            }
+            console.log("Response data:", data);
+            // 无论服务器返回什么都关闭窗口
+            window.close();
         })
         .catch(error => {
             console.error("Fetch error:", error);
+            // fetch 失败也尝试关闭窗口（可能是服务器已关闭或网络问题）
+            window.close();
         });
     }
     function pause_reading() {

@@ -17,6 +17,7 @@ from ..logger.log_manager import log_system
 from ..settings import get_settings_cache, get_setting, get_tts_cache, update_setting
 
 from readalaud.server import start_socket_server, check_if_server_running, server_pid, end_server_process
+from readalaud.time_utils import format_duration
 
 
 def bind_reading_api(instance):
@@ -112,21 +113,21 @@ def reading_data_get_and_check(self):
                     self.read_today_data["left"] = 0
                 try:
                     self.information_label_list[0].setText(
-                        f"剩余时长: {datetime.timedelta(seconds=float(self.read_today_data['left']))}"
+                        f"剩余时长: {format_duration(self.read_today_data['left'])}"
                     )
                     self.information_label_list[1].setText(
-                        f"停顿总时长: {datetime.timedelta(seconds=float(self.read_today_data['stop_total']))}"
+                        f"停顿总时长: {format_duration(self.read_today_data['stop_total'])}"
                     )
                     self.information_label_list[2].setText(
-                        f"有效朗读时间: {datetime.timedelta(seconds=float(self.read_today_data['real_read_time']))}"
+                        f"有效朗读时间: {format_duration(self.read_today_data['real_read_time'])}"
                     )
                     self.information_label_list[3].setText(
-                        f"总时长: {datetime.timedelta(seconds=float(self.read_today_data['total']))}"
+                        f"总时长: {format_duration(self.read_today_data['total'])}"
                     )
                     self.information_label_list[4].setText(f"最大音量: {float(self.read_today_data['max_sound'])}")
                     self.information_label_list[5].setText(f"效率: {self.read_today_data['efficiency']}")
                     self.labels_list[0].setText(
-                        f"朗读目标: {datetime.timedelta(seconds=float(self.load_settings['goal']))}"
+                        f"朗读目标: {format_duration(self.load_settings['goal'])}"
                     )
                     self.labels_list[1].setText(f"声音阈值: {self.load_settings['db-level']}")
                     self.labels_list[2].setText(f"语音提示: {self.load_settings['if_tts']}")

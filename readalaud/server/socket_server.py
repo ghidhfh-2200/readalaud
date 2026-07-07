@@ -76,12 +76,15 @@ def start_socket_server(queue=None):
             return {"message": "err: " + str(e)}
 
     @fast_server.post("/end_reading")
-    async def end_reading():
+    async def end_reading(data: dict = None):
         print("get_ended")
         log_system("收到结束朗读请求", "POST /end_reading")
         last_state["end_sig"] = True
         if queue is not None:
-            queue.put({"end_sig": True})
+            try:
+                queue.put({"end_sig": True})
+            except Exception as e:
+                log_system("end_reading 入队失败", str(e))
         return {"msg": "ok"}
 
     @fast_server.get("/poll")
