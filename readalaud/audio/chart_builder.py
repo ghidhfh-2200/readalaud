@@ -6,7 +6,6 @@ import numpy as np
 import pandas as pd
 import matplotlib
 import matplotlib.pyplot as plt
-import calmap
 from matplotlib import cm as _mpl_cm
 
 matplotlib.use("Agg")
@@ -17,6 +16,8 @@ def save_heatmap(df, save_dir):
     如果对应年份的图片已存在则跳过生成（缓存优化）。
     """
     from datetime import datetime
+    import calmap
+
     if df is None or df.empty:
         return {}
 

@@ -10,6 +10,13 @@ from .chart_builder import save_volume_chart
 from ..settings import get_setting
 
 
+def _safe_mtime(path):
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return 0.0
+
+
 def fetch_for_daily_data(self, date_input, force_refresh=False):
     """
     获取指定日期的详细数据。
@@ -48,9 +55,14 @@ def fetch_for_daily_data(self, date_input, force_refresh=False):
         try:
             with open(cache_path, "r") as f:
                 cached = json.load(f)
-            is_fresh = time.time() - cached.get("timestamp", 0) < 300
-            chart_ok = not (cached.get("volume_chart_path") and not os.path.exists(cached["volume_chart_path"]))
-            if is_fresh and chart_ok:
+            cache_time = float(cached.get("timestamp", 0) or 0)
+            is_fresh = time.time() - cache_time < 300
+            source_mtime = max(_safe_mtime(json_path), _safe_mtime(db_csv_path))
+            cache_covers_sources = cache_time >= source_mtime
+            db_has_data = os.path.exists(db_csv_path) and os.path.getsize(db_csv_path) > 0
+            chart_path = cached.get("volume_chart_path") or ""
+            chart_ok = (chart_path and os.path.exists(chart_path)) or not db_has_data
+            if is_fresh and cache_covers_sources and chart_ok:
                 return cached
         except (json.JSONDecodeError, OSError, KeyError):
             pass
@@ -96,7 +108,9 @@ def fetch_for_daily_data(self, date_input, force_refresh=False):
             vol_data = [float(x) for x in content.split(",") if x.strip()]
             if vol_data:
                 result["avg_volume"] = sum(vol_data) / len(vol_data)
-                if not os.path.exists(vol_chart_path) or force_refresh:
+                chart_missing = not os.path.exists(vol_chart_path)
+                chart_stale = _safe_mtime(db_csv_path) > _safe_mtime(vol_chart_path)
+                if chart_missing or chart_stale or force_refresh:
                     save_volume_chart(vol_data, vol_chart_path)
                 result["volume_chart_path"] = vol_chart_path
         except Exception as e:
